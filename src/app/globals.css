@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #07090d;
+  --bg-soft: #0c1016;
+  --surface: #11151d;
+  --surface-2: #161b25;
+  --border: #1f2633;
+  --border-strong: #2a3342;
+  --text: #e7ebf1;
+  --text-dim: #9aa4b4;
+  --text-faint: #66707f;
+  --accent: #7c5cff;
+  --accent-2: #38c3f0;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #fb7185;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-soft: var(--bg-soft);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-dim: var(--text-dim);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent2: var(--accent-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #252d3b;
+  border-radius: 8px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #33404f;
+}
+
+@layer utilities {
+  .glass-bar {
+    background: rgba(13, 16, 22, 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .glow-accent {
+    box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.35),
+      0 8px 40px -12px rgba(124, 92, 255, 0.45);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
