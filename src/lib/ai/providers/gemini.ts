@@ -39,39 +39,54 @@ export class GeminiProvider implements AIProvider {
       generationConfig,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
-    });
+    // En el nivel gratuito Gemini devuelve 503/429 transitorios por alta
+    // demanda. Reintentamos unas pocas veces con backoff antes de ceder.
+    const maxAttempts = 3;
+    let lastStatus = 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      });
 
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      throw new Error(`Gemini ${res.status}: ${err.slice(0, 200)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts
+          ?.map((p: { text?: string }) => p.text ?? "")
+          .join("")
+          .trim();
+
+        if (!text) {
+          const blockReason = data?.promptFeedback?.blockReason ?? "desconocido";
+          throw new Error(`Gemini: respuesta vacía (blockReason: ${blockReason})`);
+        }
+
+        return {
+          content: text,
+          model: data.modelVersion ?? model,
+          provider: this.id,
+          usage: data.usageMetadata
+            ? {
+                promptTokens: data.usageMetadata.promptTokenCount ?? 0,
+                completionTokens: data.usageMetadata.candidatesTokenCount ?? 0,
+              }
+            : undefined,
+        };
+      }
+
+      lastStatus = res.status;
+      const transient =
+        res.status === 503 || res.status === 429 || res.status === 500 || res.status === 502 || res.status === 504;
+      if (!transient || attempt === maxAttempts) {
+        const err = (await res.text().catch(() => "")).slice(0, 200);
+        throw new Error(`Gemini ${res.status}: ${err}`);
+      }
+
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
     }
 
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts
-      ?.map((p: { text?: string }) => p.text ?? "")
-      .join("")
-      .trim();
-
-    if (!text) {
-      const blockReason = data?.promptFeedback?.blockReason ?? "desconocido";
-      throw new Error(`Gemini: respuesta vacía (blockReason: ${blockReason})`);
-    }
-
-    return {
-      content: text,
-      model: data.modelVersion ?? model,
-      provider: this.id,
-      usage: data.usageMetadata
-        ? {
-            promptTokens: data.usageMetadata.promptTokenCount ?? 0,
-            completionTokens: data.usageMetadata.candidatesTokenCount ?? 0,
-          }
-        : undefined,
-    };
+    throw new Error(`Gemini ${lastStatus}: agotado el número de reintentos`);
   }
 }
