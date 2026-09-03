@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/sidebar";
+import Nav from "@/components/nav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Meta Winner Intelligence",
+  title: "Meta Winners",
   description:
-    "Discover, analyze and rank products from observable Meta advertising signals.",
+    "Encuentra productos con las señales publicitarias más fuertes en Meta.",
 };
 
 export default function RootLayout({
@@ -24,13 +24,15 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
-      lang="en"
+      lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-bg text-text">
-        <Sidebar />
-        <div className="pl-60">
-          <div className="mx-auto flex max-w-[1440px] flex-col px-8">{children}</div>
+        <Nav />
+        <div className="md:pl-[220px]">
+          <div className="mx-auto flex w-full max-w-[520px] flex-col px-4 pt-6 pb-24 md:max-w-[900px] md:px-8 md:pt-10 md:pb-16">
+            {children}
+          </div>
         </div>
       </body>
     </html>

@@ -90,6 +90,21 @@ export interface Product {
   markets: string[];
 }
 
+/**
+ * Market price intelligence. Only ever filled from real, observed sources.
+ * Never fabricate. `costLow`/`costHigh` are estimates with a clear source.
+ */
+export interface PriceInfo {
+  currency: string;
+  min: number;
+  typical: number;
+  max: number;
+  costLow: number | null;
+  costHigh: number | null;
+  costSource: string | null;
+  observedAt: string;
+}
+
 export interface ProductCluster {
   id: string;
   products: Product[];
@@ -145,6 +160,8 @@ export interface ScoredProduct {
   activeAds: number;
   creativeCount: number;
   marketCount: number;
+  price: PriceInfo | null;
+  daysObserved: number;
 }
 
 export interface SyncRun {

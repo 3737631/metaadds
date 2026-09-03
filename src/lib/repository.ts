@@ -1,5 +1,6 @@
 import type { DataProvider } from "@/lib/data/provider";
 import { MockDataProvider } from "@/lib/data/mockData";
+import { MetaSnapshotProvider, hasRealData } from "@/lib/data/metaProvider";
 import { normalizeAds } from "@/lib/normalize";
 import { deduplicateAds } from "@/lib/dedupe";
 import { resolveProducts } from "@/lib/entityResolution";
@@ -16,6 +17,7 @@ import type {
   DataSourceInfo,
   SyncRun,
   ProductCluster,
+  PriceInfo,
 } from "@/lib/types";
 
 /**
@@ -80,8 +82,56 @@ export interface PipelineResult {
 }
 
 export function getProviders(): DataProvider[] {
-  return [new MockDataProvider()];
+  if (hasRealData()) return [new MetaSnapshotProvider(), new MockDataProvider()];
+  return [new MockDataProvider(), new MetaSnapshotProvider()];
 }
+
+/**
+ * Observable demo price intelligence. Source is clearly the demo dataset —
+ * these are illustrative observed prices, never fabricated as real market data.
+ */
+const DEMO_PRICES: Record<string, PriceInfo> = {
+  "lumaglow.com": {
+    currency: "EUR",
+    min: 24.99,
+    typical: 29.99,
+    max: 39.99,
+    costLow: 8,
+    costHigh: 12,
+    costSource: "Estimación demo (proveedores)",
+    observedAt: new Date().toISOString(),
+  },
+  "novahome.com": {
+    currency: "EUR",
+    min: 19.99,
+    typical: 24.99,
+    max: 34.99,
+    costLow: 6,
+    costHigh: 9,
+    costSource: "Estimación demo (proveedores)",
+    observedAt: new Date().toISOString(),
+  },
+  "everfit.com": {
+    currency: "EUR",
+    min: 22.99,
+    typical: 27.99,
+    max: 37.99,
+    costLow: 7,
+    costHigh: 10,
+    costSource: "Estimación demo (proveedores)",
+    observedAt: new Date().toISOString(),
+  },
+  "purebite.com": {
+    currency: "EUR",
+    min: 14.99,
+    typical: 19.99,
+    max: 24.99,
+    costLow: 5,
+    costHigh: 8,
+    costSource: "Estimación demo (proveedores)",
+    observedAt: new Date().toISOString(),
+  },
+};
 
 async function loadProviderData(provider: DataProvider) {
   const [raw, advertiserList] = await Promise.all([
@@ -178,6 +228,10 @@ export async function getPipelineData(providerId = "demo"): Promise<PipelineResu
       penalties: scoring.penalties,
       scoredAt: new Date().toISOString(),
     };
+    const daysObserved = Math.max(
+      1,
+      Math.round((Date.now() - Date.parse(product.firstSeen)) / 86400000)
+    );
     return {
       product,
       score,
@@ -186,6 +240,8 @@ export async function getPipelineData(providerId = "demo"): Promise<PipelineResu
       activeAds: productAds.filter((a) => a.isActive).length,
       creativeCount,
       marketCount: product.markets.length,
+      price: DEMO_PRICES[product.domains[0]] ?? null,
+      daysObserved,
     };
   });
   scored.sort((a, b) => b.score.winnerScore - a.score.winnerScore);

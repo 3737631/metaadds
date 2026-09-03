@@ -75,8 +75,7 @@ export class MockDataProvider implements DataProvider {
   };
 
   private advertisers: Advertiser[] = [
-    { id: "adv-01", name: "LumaGlow Skincare", pageName: "LumaGlow", normalizedName: "lumaglowskincare", firstSeen: iso(120), lastSeen: iso(0) },
-    { id: "adv-02", name: "Radiant Skin Co", pageName: "Radiant Skin Co", normalizedName: "radiantskinco", firstSeen: iso(150), lastSeen: iso(0) },
+    { id: "adv-01", name: "LumaGlow Skincare", pageName: "LumaGlow", normalizedName: "lumaglowskincare", firstSeen: iso(120), lastSeen: iso(0) },    { id: "adv-02", name: "Radiant Skin Co", pageName: "Radiant Skin Co", normalizedName: "radiantskinco", firstSeen: iso(150), lastSeen: iso(0) },
     { id: "adv-03", name: "GlowBottle Beauty", pageName: "GlowBottle", normalizedName: "glowbottlebeauty", firstSeen: iso(90), lastSeen: iso(0) },
     { id: "adv-04", name: "DermaPure Lab", pageName: "DermaPure", normalizedName: "dermapurelab", firstSeen: iso(75), lastSeen: iso(0) },
     { id: "adv-05", name: "SkinFix Essentials", pageName: "SkinFix", normalizedName: "skinfixessentials", firstSeen: iso(60), lastSeen: iso(0) },
