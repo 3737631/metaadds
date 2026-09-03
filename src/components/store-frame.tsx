@@ -59,7 +59,7 @@ const EDITOR_SCRIPT = `
     '[data-eid][data-edit="1"]:hover { background: rgba(59,130,246,.08); }',
     '[data-eid][data-img="1"] { cursor:pointer; }',
     '.ed-banner { position:fixed; top:0; left:0; right:0; z-index:99999; background:#2563eb; color:#fff; text-align:center; font:600 12px/20px system-ui,sans-serif; letter-spacing:.2px; }'
-  ].join('\n');
+  ].join('\\n');
   document.head.appendChild(st);
 
   // Banner informativo
