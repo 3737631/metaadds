@@ -157,6 +157,11 @@ export default function CrearAnuncio({
         <div>
           <h1 className="text-xl font-bold leading-snug text-text sm:text-2xl">{productName}</h1>
           <p className="mt-0.5 text-sm text-dim">Crea tu anuncio con IA</p>
+          {isDemo && (
+            <span className="mt-1 inline-block rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+              Datos demo
+            </span>
+          )}
         </div>
       </div>
 

@@ -1,15 +1,10 @@
 import type { NextConfig } from "next";
 
-const isProd = process.env.NODE_ENV === "production";
-const repo = "metaadds";
-
 const nextConfig: NextConfig = {
-  output: "export",
-  // GitHub Pages serves the repo under the /metaadds/ base path.
-  basePath: isProd ? `/${repo}` : "",
-  assetPrefix: isProd ? `/${repo}` : "",
+  // Ejecutamos como aplicación Next.js con servidor en Vercel,
+  // por lo que NO usamos `output: export` (necesitamos API routes
+  // y acceso a secretos en el servidor).
   images: { unoptimized: true },
-  trailingSlash: true,
 };
 
 export default nextConfig;

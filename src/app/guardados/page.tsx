@@ -1,5 +1,4 @@
 import { getPipelineData } from "@/lib/repository";
-import type { ScoredProduct } from "@/lib/types";
 import SavedList from "@/components/saved-list";
 import { DemoBadge } from "@/components/demo-badge";
 
