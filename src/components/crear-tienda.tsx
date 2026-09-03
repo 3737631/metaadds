@@ -2,21 +2,16 @@
 
 import { useState } from "react";
 import { loadShopifyCreds } from "./shopify-connect";
+import ReplicaEditor from "./replica-editor";
+import { replicaToTheme } from "@/lib/stores/replica";
 import {
   Search,
   Store,
-  Sparkles,
   Loader2,
   ArrowLeft,
   ArrowRight,
   Download,
-  RefreshCw,
-  Send,
   Check,
-  Monitor,
-  Tablet,
-  Smartphone,
-  PenLine,
   ChevronDown,
 } from "lucide-react";
 
@@ -36,39 +31,7 @@ interface StoreCandidate {
   snippet: string;
 }
 
-interface StoreAnalysis {
-  url: string;
-  domain: string;
-  shopify: boolean;
-  title: string | null;
-  description: string | null;
-  brand: { logoUrl: string | null; colors: string[]; fontFamily: string | null; style: string | null };
-  home: { hero: string | null; benefits: string | null; socialProof: string | null; productCount: number | null; hasFaq: boolean; hasCta: boolean; sections: { type: string; heading: string | null; notes: string }[] };
-  product: { title: string | null; price: number | null; currency: string | null; offer: string | null; variantsCount: number | null; description: string | null; hasReviews: boolean; guarantee: string | null; cta: string | null };
-  conversion: { offerClarity: number | null; socialProofScore: number | null; trustScore: number | null; ctaClarity: number | null; structureScore: number | null; urgency: number | null; valueProp: string | null; strengths: string[]; weaknesses: string[] };
-  rawExcerpt: string | null;
-}
-
-interface StoreTheme {
-  name: string;
-  brandName: string;
-  tagline: string;
-  primaryColor: string;
-  secondaryColor: string;
-  backgroundColor: string;
-  textColor: string;
-  accentColor: string;
-  fontFamily: string;
-  header: { logoText: string; menu: string[] };
-  hero: { headline: string; subheadline: string; ctaLabel: string; ctaHref: string; showImage: boolean };
-  homeSections: { type: string; heading: string; text: string; ctaLabel?: string; ctaHref?: string; imageUrl?: string; items?: { title: string; text: string }[] }[];
-  product: { title: string; price: number; compareAtPrice: number | null; description: string; benefits: string[]; ctaLabel: string; badge: string | null; currency: string };
-  footer: { about: string; links: { text: string; href: string }[]; newsletter: boolean };
-}
-
-type Step = "topic" | "search" | "result" | "editor";
-
-type PreviewDevice = "desktop" | "tablet" | "mobile";
+type Step = "topic" | "result" | "editor";
 
 export default function CrearTienda({ categories }: { categories: Category[] }) {
   const [step, setStep] = useState<Step>("topic");
@@ -77,19 +40,10 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [candidates, setCandidates] = useState<StoreCandidate[]>([]);
   const [searchNote, setSearchNote] = useState("");
   const [selected, setSelected] = useState<StoreCandidate | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<StoreAnalysis | null>(null);
-  const [similarity, setSimilarity] = useState<{ score: number; reason: string } | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [theme, setTheme] = useState<StoreTheme | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chat, setChat] = useState<{ role: "user" | "ai" | "sys"; text: string }[]>([]);
-  const [preview, setPreview] = useState<PreviewDevice>("desktop");
+  const [opening, setOpening] = useState(false);
+  const [replica, setReplica] = useState<import("@/lib/stores/replica").StoreReplica | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [brandName, setBrandName] = useState("");
   const [notif, setNotif] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState<string | null>(null);
@@ -123,82 +77,32 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     }
   }
 
-  async function doAnalyze(c: StoreCandidate) {
+  async function doOpen(c: StoreCandidate) {
     setSelected(c);
-    setAnalyzing(true);
+    setOpening(true);
     setError(null);
+    setUploaded(null);
     try {
-      const res = await fetch("/api/stores/analyze", {
+      const res = await fetch("/api/stores/replica", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: c.url }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error?.message || "No se pudo analizar la tienda");
-      setAnalysis(json.data.analysis);
-      setSimilarity(json.data.similarity);
-      setChat([{ role: "ai", text: `He analizado ${json.data.analysis.domain}. Es una tienda ${json.data.analysis.shopify ? "de Shopify" : "de otro gestor"}. Puedo crear tu tienda imitando su estructura y estilo pero con tu propia marca.` }]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al analizar");
-    } finally {
-      setAnalyzing(false);
-    }
-  }
-
-  async function doGenerate() {
-    if (!analysis) return;
-    setGenerating(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/stores/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: analysis.url,
-          analysis,
-          brandName: brandName.trim() || undefined,
-          userPreferences: "Mejora pequeños detalles, añade marca personal propia, cambia el logo y los nombres.",
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error?.message || "No se pudo generar la tienda");
-      setTheme(json.data.theme);
-      setChat((prev) => [...prev, { role: "ai", text: `¡Listo! He creado tu tienda "${json.data.theme.brandName}". Puedes editarla abajo o pedirme cambios por chat.` }]);
+      if (!res.ok) throw new Error(json.error?.message || "No se pudo abrir la tienda");
+      setReplica(json.data.replica);
       setStep("editor");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al generar");
+      setError(e instanceof Error ? e.message : "Error al abrir la tienda");
     } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function doChat(text: string) {
-    if (!text.trim() || !theme) return;
-    setChat((prev) => [...prev, { role: "user", text }]);
-    setChatInput("");
-    setChatLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/stores/edit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: analysis?.url ?? "", theme, instruction: text }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error?.message || "No se pudo aplicar el cambio");
-      setTheme(json.data.theme);
-      setChat((prev) => [...prev, { role: "ai", text: "Listo, he aplicado tu cambio." }]);
-    } catch (e) {
-      setChat((prev) => [...prev, { role: "sys", text: "No pude aplicar el cambio, inténtalo de nuevo." }]);
-      setError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setChatLoading(false);
+      setOpening(false);
     }
   }
 
   async function doDownload() {
-    if (!theme) return;
+    if (!replica) return;
     setDownloading(true);
+    const theme = replicaToTheme(replica);
     try {
       const res = await fetch("/api/shopify/theme/download", {
         method: "POST",
@@ -224,7 +128,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   }
 
   async function doUpload() {
-    if (!theme) return;
+    if (!replica) return;
     setUploading(true);
     setUploaded(null);
     setError(null);
@@ -234,6 +138,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       setUploading(false);
       return;
     }
+    const theme = replicaToTheme(replica);
     try {
       const res = await fetch("/api/shopify/upload", {
         method: "POST",
@@ -289,7 +194,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
                 setCandidates([]);
                 setSearchNote("");
                 setSelected(null);
-                setAnalysis(null);
+                setReplica(null);
               }}
               className="w-full appearance-none rounded-2xl border border-border bg-surface px-4 py-3.5 text-base font-semibold text-text focus:border-accent focus:outline-none"
             >
@@ -317,7 +222,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
         </button>
       </div>
 
-      {step === "topic" || step === "search" ? (
+      {step === "topic" ? (
         <p className="text-center text-xs text-dim">
           {searching
             ? `Buscando tiendas reales de ${topic?.label}... puede tardar unos segundos.`
@@ -369,72 +274,28 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
                     </a>
                     <button
                       type="button"
-                      onClick={() => doAnalyze(c)}
-                      disabled={analyzing && selected?.id === c.id}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-accent/15 px-3 py-2 text-xs font-semibold text-accent2 ring-1 ring-accent/30"
+                      onClick={() => doOpen(c)}
+                      disabled={opening && selected?.id === c.id}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-white ring-1 ring-accent"
                     >
-                      {analyzing && selected?.id === c.id ? (
+                      {opening && selected?.id === c.id ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <ArrowRight className="h-3.5 w-3.5" />
+                        <Check className="h-3.5 w-3.5" />
                       )}
-                      {analyzing && selected?.id === c.id ? "Analizando..." : "Analizar"}
+                      {opening && selected?.id === c.id ? "Abriendo..." : "Abrir y editar"}
                     </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
-
-          {/* Resultado del análisis */}
-          {analysis && selected && (
-            <div className="mt-4 rounded-2xl border border-accent/40 bg-accent/5 p-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-text">Análisis de {analysis.domain}</h3>
-                {similarity && (
-                  <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-bold text-text">
-                    Similitud: {similarity.score}%
-                  </span>
-                )}
-              </div>
-              <div className="mt-3 space-y-1.5 text-sm text-dim">
-                <p><span className="text-faint">Título:</span> {analysis.title ?? "—"}</p>
-                <p><span className="text-faint">Estilo:</span> {analysis.brand.style ?? "—"}</p>
-                <p><span className="text-faint">Colores:</span> {analysis.brand.colors?.join(", ") || "—"}</p>
-                {analysis.conversion.valueProp && (
-                  <p><span className="text-faint">Propuesta de valor:</span> {analysis.conversion.valueProp}</p>
-                )}
-              </div>
-              <div className="mt-2 flex flex-col gap-2 items-start">
-                <p className="text-xs text-faint">{similarity?.reason}</p>
-              </div>
-
-              <div className="mt-4">
-                <label className="text-xs font-medium text-dim">Nombre de tu marca (opcional)</label>
-                <input
-                  value={brandName}
-                  onChange={(e) => setBrandName(e.target.value)}
-                  placeholder="Nombre de tu marca"
-                  className="mt-1 w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-sm text-text focus:border-accent focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={doGenerate}
-                disabled={generating}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-accent/25 hover:brightness-110 disabled:opacity-40"
-              >
-                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                {generating ? "Creando tu tienda..." : "CREAR MI TIENDA"}
-              </button>
-            </div>
-          )}
         </>
       ) : null}
 
-      {/* PASO 2: editor + preview + chat */}
-      {step === "editor" && theme ? (
-        <>
+      {/* PASO 2: editor fiel click-to-edit */}
+      {step === "editor" && replica ? (
+        <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <button
               type="button"
@@ -443,284 +304,49 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             >
               <ArrowLeft className="h-4 w-4" /> Volver a tiendas
             </button>
-            <div className="flex items-center gap-1 rounded-xl bg-surface-2 p-1">
-              {(["desktop", "tablet", "mobile"] as PreviewDevice[]).map((d) => {
-                const Icon = d === "desktop" ? Monitor : d === "tablet" ? Tablet : Smartphone;
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setPreview(d)}
-                    aria-label={d}
-                    className={"rounded-lg p-1.5 " + (preview === d ? "bg-surface text-accent2" : "text-faint")}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </button>
-                );
-              })}
-            </div>
+            <span className="text-xs text-faint">
+              Haz clic en cualquier texto, color o imagen para editarlo
+            </span>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            {/* Editor */}
-            <div className="flex flex-col gap-4">
-              <EditorField label="Marca" value={theme.brandName} onString={(v) => setTheme({ ...theme, brandName: v })} />
-              <EditorField label="Eslogan" value={theme.tagline} onString={(v) => setTheme({ ...theme, tagline: v })} />
-              <EditorField label="Color primario" type="color" value={theme.primaryColor} onString={(v) => setTheme({ ...theme, primaryColor: v })} />
-              <EditorField label="Color de fondo" type="color" value={theme.backgroundColor} onString={(v) => setTheme({ ...theme, backgroundColor: v })} />
-              <EditorField label="Color de texto" type="color" value={theme.textColor} onString={(v) => setTheme({ ...theme, textColor: v })} />
-              <EditorField
-                label="Hero (título)"
-                value={theme.hero.headline}
-                onString={(v) => setTheme({ ...theme, hero: { ...theme.hero, headline: v } })}
-              />
-              <EditorField
-                label="Hero (subtítulo)"
-                value={theme.hero.subheadline}
-                onString={(v) => setTheme({ ...theme, hero: { ...theme.hero, subheadline: v } })}
-              />
-              <EditorField
-                label="CTA"
-                value={theme.hero.ctaLabel}
-                onString={(v) => setTheme({ ...theme, hero: { ...theme.hero, ctaLabel: v } })}
-              />
-              {theme.homeSections.map((sec, i) => (
-                <div key={i} className="rounded-xl border border-border bg-surface p-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-faint">Sección {i + 1} · {sec.type}</div>
-                  <EditorField label="Título" value={sec.heading} onString={(v) => setTheme({ ...theme, homeSections: theme.homeSections.map((s, j) => (j === i ? { ...s, heading: v } : s)) })} />
-                  <EditorField label="Texto" value={sec.text} onString={(v) => setTheme({ ...theme, homeSections: theme.homeSections.map((s, j) => (j === i ? { ...s, text: v } : s)) })} />
-                </div>
-              ))}
+          <ReplicaEditor replica={replica} onChange={setReplica} />
 
-              <button
-                type="button"
-                onClick={doDownload}
-                disabled={downloading}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
-              >
-                {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                {downloading ? "Generando ZIP..." : "DESCARGAR TEMA SHOPIFY (ZIP)"}
-              </button>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={doDownload}
+              disabled={downloading}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
+            >
+              {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {downloading ? "Generando ZIP..." : "DESCARGAR TEMA SHOPIFY (ZIP)"}
+            </button>
 
-              <button
-                type="button"
-                onClick={doUpload}
-                disabled={uploading}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
+            <button
+              type="button"
+              onClick={doUpload}
+              disabled={uploading}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              {uploading ? "Subiendo a tu tienda..." : "SUBIR A MI TIENDA SHOPIFY"}
+            </button>
+            {uploaded && (
+              <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-400">
+                {uploaded}
+              </p>
+            )}
+            {!loadShopifyCreds() && (
+              <a
+                href="/ajustes"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-dim hover:text-text"
               >
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                {uploading ? "Subiendo a tu tienda..." : "SUBIR A MI TIENDA SHOPIFY"}
-              </button>
-              {uploaded && (
-                <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-400">
-                  {uploaded}
-                </p>
-              )}
-              {!loadShopifyCreds() && (
-                <a
-                  href="/ajustes"
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-dim hover:text-text"
-                >
-                  Conectar mi tienda (dominio y token) en Ajustes
-                </a>
-              )}
-            </div>
-
-            {/* Preview */}
-            <div>
-              <div
-                className="mx-auto overflow-hidden rounded-2xl border border-border shadow-2xl"
-                style={{
-                  width: preview === "mobile" ? 220 : preview === "tablet" ? 380 : "100%",
-                  maxWidth: "100%",
-                  background: theme.backgroundColor,
-                  color: theme.textColor,
-                  fontFamily: theme.fontFamily || "sans-serif",
-                }}
-              >
-                <StorePreview theme={theme} />
-              </div>
-            </div>
-          </div>
-
-          {/* Chat IA */}
-          <div className="rounded-2xl border border-border bg-surface p-4">
-            <h3 className="flex items-center gap-2 text-base font-semibold text-text">
-              <PenLine className="h-4 w-4 text-accent2" /> Edita con IA
-            </h3>
-            <div className="mt-3 flex max-h-48 flex-col gap-2 overflow-y-auto">
-              {chat.map((m, i) => (
-                <div
-                  key={i}
-                  className={
-                    "max-w-[85%] rounded-xl px-3 py-2 text-sm " +
-                    (m.role === "user"
-                      ? "self-end bg-accent/20 text-text"
-                      : m.role === "ai"
-                        ? "self-start bg-surface-2 text-dim"
-                        : "self-start bg-rose-500/10 text-rose-300")
-                  }
-                >
-                  {m.text}
-                </div>
-              ))}
-              {chatLoading && (
-                <div className="self-start flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-dim">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Editando...
-                </div>
-              )}
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") doChat(chatInput);
-                }}
-                placeholder="Ej: pon el hook más agresivo, usa tono de lujo, cambia el CTA..."
-                className="flex-1 rounded-xl border border-border bg-bg px-3 py-2.5 text-sm text-text focus:border-accent focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => doChat(chatInput)}
-                disabled={!chatInput.trim() || chatLoading}
-                className="inline-flex items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-white disabled:opacity-40"
-                aria-label="Enviar"
-              >
-                {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </button>
-            </div>
-            {analysis && (
-              <button
-                type="button"
-                onClick={() => setTheme({ ...theme, primaryColor: analysis.brand.colors[0] || theme.primaryColor })}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-dim hover:text-text"
-              >
-                <RefreshCw className="h-3.5 w-3.5" /> Usar color principal de la competencia
-              </button>
+                Conectar mi tienda (dominio y token) en Ajustes
+              </a>
             )}
           </div>
-        </>
+        </div>
       ) : null}
-    </div>
-  );
-}
-
-function EditorField({
-  label,
-  value,
-  type = "text",
-  onString,
-}: {
-  label: string;
-  value?: string;
-  type?: "text" | "color";
-  onString: (v: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="text-xs font-medium text-dim">{label}</span>
-      <input
-        type={type}
-        value={value ?? ""}
-        onChange={(e) => onString(e.target.value)}
-        className="mt-1 w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-text focus:border-accent focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function StorePreview({ theme }: { theme: StoreTheme }) {
-  return (
-    <div className="min-h-full">
-      {/* Header */}
-      <header
-        style={{ background: theme.primaryColor, color: "#fff" }}
-        className="flex items-center justify-between px-4 py-3"
-      >
-        <span className="text-base font-bold">{theme.header.logoText || theme.brandName}</span>
-        <nav className="hidden gap-3 text-xs sm:flex">
-          {theme.header.menu.map((m, i) => (
-            <span key={i}>{m}</span>
-          ))}
-        </nav>
-      </header>
-
-      {/* Hero */}
-      <section className="px-4 py-8 text-center">
-        <h1 className="text-xl font-bold leading-tight" style={{ color: theme.textColor }}>
-          {theme.hero.headline}
-        </h1>
-        {theme.hero.subheadline && (
-          <p className="mt-2 text-sm" style={{ color: theme.textColor, opacity: 0.8 }}>
-            {theme.hero.subheadline}
-          </p>
-        )}
-        <a
-          href={theme.hero.ctaHref || "#"}
-          className="mt-4 inline-block rounded-full px-5 py-2.5 text-sm font-semibold text-white"
-          style={{ background: theme.accentColor || theme.primaryColor }}
-        >
-          {theme.hero.ctaLabel}
-        </a>
-      </section>
-
-      {/* Sections */}
-      {theme.homeSections.map((s, i) => (
-        <section key={i} className="border-t px-4 py-6" style={{ borderColor: theme.primaryColor + "33" }}>
-          <h2 className="text-base font-bold" style={{ color: theme.textColor }}>
-            {s.heading}
-          </h2>
-          {s.text && <p className="mt-1.5 text-xs" style={{ color: theme.textColor, opacity: 0.8 }}>{s.text}</p>}
-          {s.items && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {s.items.map((it, j) => (
-                <div key={j} className="rounded-lg p-2" style={{ background: theme.primaryColor + "1a" }}>
-                  <div className="text-xs font-semibold">{it.title}</div>
-                  <div className="text-[11px]" style={{ opacity: 0.8 }}>{it.text}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      ))}
-
-      {/* Product */}
-      <section className="border-t px-4 py-6" style={{ borderColor: theme.primaryColor + "33" }}>
-        <h2 className="text-base font-bold">{theme.product.title}</h2>
-        <div className="mt-2 flex items-baseline gap-2">
-          <span className="text-lg font-bold" style={{ color: theme.accentColor || theme.primaryColor }}>
-            {theme.product.currency || "€"}
-            {theme.product.price}
-          </span>
-          {theme.product.compareAtPrice != null && (
-            <span className="text-xs" style={{ opacity: 0.5, textDecoration: "line-through" }}>
-              {theme.product.currency || "€"}
-              {theme.product.compareAtPrice}
-            </span>
-          )}
-        </div>
-        {theme.product.description && (
-          <p className="mt-2 text-xs" style={{ opacity: 0.8 }}>{theme.product.description}</p>
-        )}
-        <button
-          className="mt-3 w-full rounded-full py-2.5 text-sm font-semibold text-white"
-          style={{ background: theme.accentColor || theme.primaryColor }}
-        >
-          {theme.product.ctaLabel}
-        </button>
-      </section>
-
-      {/* Footer */}
-      <footer className="px-4 py-5 text-xs" style={{ background: theme.primaryColor, color: "#fff" }}>
-        <p>{theme.footer.about}</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {theme.footer.links.map((l, i) => (
-            <span key={i}>{l.text}</span>
-          ))}
-        </div>
-        {theme.footer.newsletter && <p className="mt-2 opacity-80">Suscríbete a nuestras novedades</p>}
-      </footer>
     </div>
   );
 }

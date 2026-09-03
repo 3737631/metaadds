@@ -276,6 +276,58 @@ export async function buildReplica(rawUrl: string): Promise<StoreReplica> {
   };
 }
 
+/**
+ * Convierte una réplica editable en el StoreTheme que espera el generador de
+ * ZIP de Shopify. Mapea los datos fieles de la réplica a la forma del tema.
+ */
+import type { StoreTheme } from "./types";
+
+export function replicaToTheme(r: StoreReplica): StoreTheme {
+  const [primary, secondary, background, accent] = [
+    r.brand.colors[0] ?? "#1a1a2e",
+    r.brand.colors[1] ?? "#2b2b4a",
+    r.brand.colors[2] ?? "#ffffff",
+    r.brand.colors[3] ?? "#e94560",
+  ];
+  return {
+    name: r.brand.name || r.domain,
+    brandName: r.brand.name || r.domain,
+    tagline: r.hero.subheadline,
+    primaryColor: primary,
+    secondaryColor: secondary,
+    backgroundColor: background,
+    textColor: "#1f2937",
+    accentColor: accent,
+    fontFamily: r.brand.fontFamily || "sans-serif",
+    header: { logoText: r.header.logoText || r.brand.name, menu: r.header.menu },
+    hero: {
+      headline: r.hero.headline,
+      subheadline: r.hero.subheadline,
+      ctaLabel: r.hero.ctaLabel || "Comprar ahora",
+      ctaHref: r.hero.ctaHref || "#",
+      showImage: Boolean(r.hero.imageUrl),
+    },
+    homeSections: r.sections.map((s) => ({
+      type: s.type,
+      heading: s.heading,
+      text: s.text,
+      imageUrl: s.imageUrl || undefined,
+      items: s.items,
+    })),
+    product: {
+      title: r.product.title,
+      price: r.product.price ?? 0,
+      compareAtPrice: r.product.compareAt,
+      description: r.product.description,
+      benefits: [],
+      ctaLabel: r.product.ctaLabel || "Añadir al carrito",
+      badge: r.product.badge,
+      currency: r.product.currency,
+    },
+    footer: { about: r.footer.about, links: r.footer.links, newsletter: r.footer.newsletter },
+  };
+}
+
 function beheading(host: string): string {
   const part = (host || "").split(".")[0] || "";
   return part.charAt(0).toUpperCase() + part.slice(1);
