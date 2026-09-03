@@ -209,22 +209,36 @@ export async function buildReplica(rawUrl: string): Promise<StoreReplica> {
     html.match(/<(?:button|a)[^>]*class="[^"]*(?:btn|cta|button|shop)[^"]*"/i)?.[0]
       ?.match(/href=["']([^"']+)["']/)?.[1] ?? "#";
 
-  // --- Secciones: agrupar los h2/p/img siguientes a la hero ---
+  // --- Secciones: agrupar los h2/p/img que siguen a la hero, filtrando ruido ---
   const sections: ReplicaSection[] = [];
-  const headings = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)].slice(0, 8);
-  for (let i = 0; i < headings.length; i++) {
+  const headings = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)].slice(0, 14);
+  const NOISE = /iniciar sesi|crear una cuenta|conmutar el modo|ir a la|accesibilidad|pie de p.gina|navegaci.n|español|english|idioma|finalizar compra/i;
+  let used = 0;
+  for (let i = 0; i < headings.length && used < 8; i++) {
     const h = stripTags(headings[i][1]);
-    if (!h) continue;
-    const para = html.match(new RegExp(`<p[^>]*>([\\s\\S]{0,400}?)</p>`, "i"))?.[1] ?? "";
+    if (!h || h.trim().length < 2) continue;
+    if (NOISE.test(h)) continue;
+    // contexto local: texto e imagen a partir de este h2 hasta el siguiente h2/section
+    const next = headings.slice(i + 1).find((n) => n.index > headings[i].index);
+    const ctx = html.slice(headings[i].index, next?.index ?? html.length);
+    const ctxTrunc = ctx.slice(0, 1200);
+    const para = [...ctxTrunc.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)][0]?.[1] ?? "";
     const img =
-      [...html.matchAll(/<img[^>]*src=["']([^"']+)["']/gi)].map((m) => absolutize(m[1], base)).find(Boolean) ?? null;
+      [...ctxTrunc.matchAll(/<img[^>]*src=["']([^"']+)["']/gi)]
+        .map((m) => absolutize(m[1], base))
+        .find((u) => u && !/logo|brand|icon|sprite/i.test(u) && !/\.(svg|ico|gif)$/i.test(u)) ?? null;
+    const text = stripTags(para).replace(/\s+/g, " ").slice(0, 300);
+    const lh = h.toLowerCase();
     sections.push({
-      type: ["beneficios", "productos", "testimonios", "faq"].find((t) => h.toLowerCase().includes(t)) ?? "info",
+      type: ["beneficios", "productos", "testimonios", "faq"].find((t) => lh.includes(t)) ?? "info",
       heading: h,
-      text: stripTags(para).slice(0, 300),
+      text,
       imageUrl: img,
-      items: stripTags(para).split(/\.\s+|\n/).filter((s) => s && s.length > 4).slice(0, 3).map((s) => ({ title: s.slice(0, 40), text: s })),
+      items: text.split(/\.\s+|\n/).filter((s) => s && s.length > 4)
+        .slice(0, 3)
+        .map((s) => ({ title: s.slice(0, 40), text: s })),
     });
+    used++;
   }
 
   // --- Producto: primera tarjeta con precio ---
