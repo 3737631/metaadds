@@ -69,7 +69,7 @@ REGLAS:
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
   const bodyOnly = extractBody(html);
-  const safe = bodyOnly.slice(0, 12000);
+  const safe = bodyOnly.slice(0, 7000);
   return `TENDA / DOMINIO: ${domain}
 
 INSTRUCCIÓN DEL USUARIO: ${request}
@@ -101,7 +101,7 @@ export async function chatEditStore(opts: {
     userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
     responseFormat: "json",
     temperature: 0.4,
-    maxTokens: 2000,
+    maxTokens: 1024,
   });
 
   const json = repairJson(result.content);
