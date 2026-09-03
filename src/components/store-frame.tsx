@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { Store, Loader2, Pencil } from "lucide-react";
+import type { ChatOp } from "@/lib/stores/chat";
 
 /**
  * Vista en miniatura de la web REAL de la tienda, renderizada en un iframe aislado.
@@ -136,18 +138,65 @@ const EDITOR_SCRIPT = `
 })();
 `;
 
+/**
+ * Receptor de operaciones del chatbot. Se inyecta SIEMPRE (incluso en modo vista)
+ * para que el usuario pueda pedir cambios por chat sin entrar en modo edición.
+ * Escucha mensajes del padre {type:'apply-ops', ops: ChatOp[]} y los aplica en vivo.
+ */
+const OPS_RECEIVER = `
+(function () {
+  var apply = function (op) {
+    var els = Array.prototype.slice.call(document.querySelectorAll(op.selector || ''));
+    var val = op.value !== undefined ? op.value : (op.text !== undefined ? op.text : (op.src !== undefined ? op.src : (op.html !== undefined ? op.html : '')));
+    if (!els.length) {
+      return { ok: false, selector: op.selector };
+    }
+    els.forEach(function (el) {
+      switch (op.op) {
+        case 'replaceText': el.textContent = val; break;
+        case 'replaceInner': el.innerHTML = val; break;
+        case 'setStyle': if (el.style) { el.style[op.prop] = val; } break;
+        case 'setImage':
+          if (el.tagName === 'IMG') el.setAttribute('src', val);
+          else if (el.style) el.style.backgroundImage = 'url(' + val + ')';
+          break;
+        case 'setAttr': el.setAttribute(op.attr || op.prop || 'href', val); break;
+        case 'hide': if (el.style) el.style.display = 'none'; break;
+        case 'remove': el.remove(); break;
+      }
+    });
+    return { ok: true, selector: op.selector };
+  };
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.type !== 'apply-ops') return;
+    var ops = Array.isArray(d.ops) ? d.ops : [];
+    var applied = 0, failed = 0;
+    ops.forEach(function (op) {
+      var r = apply(op);
+      if (r && r.ok) applied++; else failed++;
+    });
+    if (parent && parent !== window) {
+      parent.postMessage({ type: 'ops-applied', applied: applied, failed: failed }, '*');
+    }
+  });
+})();
+`;
+
 export default function StoreFrame({
   html,
   title,
   shopify,
   domain,
   editMode = false,
+  opsRef,
 }: {
   html: string;
   title: string;
   shopify: boolean;
   domain: string;
   editMode?: boolean;
+  opsRef?: RefObject<((ops: ChatOp[]) => void) | null>;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -163,6 +212,17 @@ export default function StoreFrame({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Exponer al padre un manejador para aplicar operaciones del chatbot en el iframe.
+  useEffect(() => {
+    if (!opsRef) return;
+    opsRef.current = (ops: ChatOp[]) => {
+      iframeRef.current?.contentWindow?.postMessage({ type: "apply-ops", ops }, "*");
+    };
+    return () => {
+      if (opsRef) opsRef.current = null;
+    };
+  }, [opsRef]);
 
   // Recibir notificaciones de edición desde dentro del iframe.
   const onEdit = useCallback((eid: string, mode: string, value: string) => {
@@ -183,16 +243,20 @@ export default function StoreFrame({
   }, [onEdit]);
 
   const editableSrc = useMemo(() => {
-    // Sin modo edición: mostramos la web real tal cual (con sus scripts y animaciones).
-    if (!editMode) return html;
-    // En modo edición inyectamos nuestro script de editor justo antes de </body>.
-    const marker = "</body>";
-    const idx = html.lastIndexOf(marker);
+    // Siempre inyectamos el receptor de operaciones del chatbot para poder aplicar
+    // cambios por chat aunque no estemos en modo edición.
+    const idx = html.lastIndexOf("</body>");
     if (idx === -1) return html;
-    // Usamos '' + concatenación (no template literal) para que el cierre sea un `</script>` REAL
-    // que cierre la etiqueta en el HTML del srcdoc; un `<\/script>` escapado dejaría el <script>
-    // abierto y el parser se tragaría el resto del HTML (no ejecutaría nuestro editor).
-    return html.slice(0, idx) + "<script>" + EDITOR_SCRIPT + "</script>" + html.slice(idx);
+    // Concatenación simple (no template literal) para obtener un `</script>` REAL que
+    // cierre la etiqueta en el srcdoc; un `<\/script>` escapado dejaría el <script>
+    // abierto y el parser se tragaría el resto del HTML.
+    const receiver = "<script>" + OPS_RECEIVER + "</script>";
+    if (!editMode) {
+      return html.slice(0, idx) + receiver + html.slice(idx);
+    }
+    // En modo edición añadimos además el editor click-to-edit.
+    const editor = "<script>" + EDITOR_SCRIPT + "</script>";
+    return html.slice(0, idx) + receiver + editor + html.slice(idx);
   }, [html, editMode]);
 
   const scale = width > 0 ? width / BASE_WIDTH : 1;

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { loadShopifyCreds } from "./shopify-connect";
 import StoreFrame from "./store-frame";
 import { replicaToTheme } from "@/lib/stores/replica";
+import type { ChatOp } from "@/lib/stores/chat";
 import {
   Search,
   Store,
@@ -14,6 +15,8 @@ import {
   Check,
   ChevronDown,
   Pencil,
+  Send,
+  Sparkles,
 } from "lucide-react";
 
 type Category = { id: string; label: string };
@@ -50,6 +53,10 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState<{ role: "user" | "ai" | "sys"; text: string }[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatOpsRef = useRef<((ops: ChatOp[]) => void) | null>(null);
 
   function flash(msg: string) {
     setNotif(msg);
@@ -86,6 +93,8 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setError(null);
     setUploaded(null);
     setEditing(false);
+    setChatMsgs([]);
+    setChatInput("");
     try {
       // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
       const [snapRes, reproRes] = await Promise.all([
@@ -112,6 +121,33 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       setError(e instanceof Error ? e.message : "Error al abrir la tienda");
     } finally {
       setOpening(false);
+    }
+  }
+
+  async function doChat(text: string) {
+    const req = text.trim();
+    if (!req || !selected || chatLoading) return;
+    setChatMsgs((prev) => [...prev, { role: "user", text: req }]);
+    setChatInput("");
+    setChatLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/stores/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: selected.url, request: req }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error?.message || "No pude aplicar el cambio");
+      const ops: ChatOp[] = json.data?.ops || [];
+      if (ops.length && chatOpsRef.current) chatOpsRef.current(ops);
+      const reply: string = json.data?.reply || "He aplicado tus cambios.";
+      setChatMsgs((prev) => [...prev, { role: "ai", text: reply }]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al aplicar el cambio");
+      setChatMsgs((prev) => [...prev, { role: "sys", text: "No pude aplicar tu petición. Inténtalo de nuevo." }]);
+    } finally {
+      setChatLoading(false);
     }
   }
 
@@ -350,7 +386,62 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             shopify={snapshot.shopify}
             domain={snapshot.domain}
             editMode={editing}
+            opsRef={chatOpsRef}
           />
+
+          {/* Chat: pide cambios y se aplican en vivo sobre la mini web */}
+          <div className="rounded-2xl border border-border bg-surface p-4">
+            <h3 className="flex items-center gap-2 text-base font-semibold text-text">
+              <Sparkles className="h-4 w-4 text-accent2" /> Pide cambios por chat
+            </h3>
+            <div className="mt-3 flex max-h-56 flex-col gap-2 overflow-y-auto">
+              {chatMsgs.length === 0 && (
+                <p className="text-xs text-faint">
+                  Ej: «cambia el titular por Hola Mundo», «pon el botón en rojo», «quita el banner de cookies»…
+                </p>
+              )}
+              {chatMsgs.map((m, i) => (
+                <div
+                  key={i}
+                  className={
+                    "max-w-[85%] rounded-xl px-3 py-2 text-sm " +
+                    (m.role === "user"
+                      ? "self-end bg-accent/20 text-text"
+                      : m.role === "ai"
+                        ? "self-start bg-surface-2 text-dim"
+                        : "self-start bg-rose-500/10 text-rose-300")
+                  }
+                >
+                  {m.text}
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="self-start flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-dim">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Aplicando cambios…
+                </div>
+              )}
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") doChat(chatInput);
+                }}
+                placeholder="Describe qué quieres cambiar…"
+                className="flex-1 rounded-xl border border-border bg-bg px-3 py-2.5 text-sm text-text focus:border-accent focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => doChat(chatInput)}
+                disabled={!chatInput.trim() || chatLoading}
+                className="inline-flex items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-white disabled:opacity-40"
+                aria-label="Enviar cambio"
+              >
+                {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-2">
             <button
