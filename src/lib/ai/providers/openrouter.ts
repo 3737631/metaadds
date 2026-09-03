@@ -19,7 +19,7 @@ export class OpenRouterProvider implements AIProvider {
         { role: "user", content: input.userPrompt },
       ],
       temperature: input.temperature ?? 0.7,
-      max_tokens: input.maxTokens ?? 4096,
+      max_tokens: input.maxTokens ?? 1600,
     };
 
     if (input.responseFormat === "json") {

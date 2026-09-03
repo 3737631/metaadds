@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       userPrompt: buildCreativeUserPrompt(parsed.data),
       responseFormat: "json",
       temperature: 0.7,
-      maxTokens: 4096,
+      maxTokens: 1600,
     });
 
     let json: unknown;
