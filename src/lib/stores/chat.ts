@@ -22,6 +22,14 @@ function repairJson(raw: string): unknown | null {
   let cleaned = raw.trim();
   const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) cleaned = fence[1].trim();
+  // Si es un array de ops (la IA a veces no envuelve en {reply,ops}), intenta parsearlo directamente.
+  if (cleaned.startsWith("[")) {
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
+  }
   const a = cleaned.indexOf("{");
   const b = cleaned.lastIndexOf("}");
   if (a >= 0 && b > a) cleaned = cleaned.slice(a, b + 1);
@@ -98,8 +106,19 @@ export async function chatEditStore(opts: {
 
   const json = repairJson(result.content);
   if (!json) return null;
-  const root = json as Record<string, unknown>;
-  const opsArr = Array.isArray(root.ops) ? (root.ops as unknown[]) : [];
+
+  // Normaliza el sobre: {reply,ops[]}, ops[] directo, o un solo op {selector,...}.
+  let reply = "";
+  let opsArr: unknown[] = [];
+  if (Array.isArray(json)) {
+    opsArr = json;
+  } else if (json && typeof json === "object") {
+    const obj = json as Record<string, unknown>;
+    if (typeof obj.reply === "string") reply = obj.reply;
+    if (Array.isArray(obj.ops)) opsArr = obj.ops;
+    else if (obj.selector) opsArr = [json];
+  }
+
   const ops = opsArr
     .map((o) => toChatOp(o))
     .filter((o): o is ChatOp => o !== null);
@@ -107,7 +126,7 @@ export async function chatEditStore(opts: {
     console.error("[/chat] sin ops aplicables. Respuesta IA:", result.content.slice(0, 3000));
   }
   return {
-    reply: typeof root.reply === "string" ? root.reply : "He aplicado tus cambios.",
+    reply: reply || "He aplicado tus cambios.",
     ops,
   };
 }
@@ -149,7 +168,7 @@ function normOp(op: string): string {
 function toChatOp(o: unknown): ChatOp | null {
   if (!o || typeof o !== "object") return null;
   const c = o as Record<string, unknown>;
-  const op0 = c.op;
+  const op0 = typeof c.op === "string" ? c.op : typeof c.action === "string" ? c.action : c.type;
   if (typeof op0 !== "string") return null;
   const op = normOp(op0);
   let selector: unknown = c.selector;
@@ -157,21 +176,18 @@ function toChatOp(o: unknown): ChatOp | null {
   if (typeof selector !== "string" || !selector.trim()) return null;
   let value: unknown = c.value;
   if (typeof value !== "string") value = c.text;
+  if (typeof value !== "string" && typeof value !== "number") value = String(value ?? "");
   switch (op) {
     case "replaceText":
-      return typeof value === "string" ? { op: op as "replaceText", selector, text: value } : null;
+      return { op: "replaceText", selector, text: String(value) };
     case "replaceInner":
-      return { op: "replaceInner", selector, html: typeof value === "string" ? value : "" };
+      return { op: "replaceInner", selector, html: String(typeof c.html === "string" ? c.html : value) };
     case "setStyle":
-      return typeof c.prop === "string" && typeof value === "string"
-        ? { op: "setStyle", selector, prop: c.prop, value }
-        : null;
+      return typeof c.prop === "string" ? { op: "setStyle", selector, prop: c.prop, value: String(value) } : null;
     case "setImage":
-      return typeof value === "string" ? { op: "setImage", selector, src: value } : null;
+      return { op: "setImage", selector, src: String(value) };
     case "setAttr":
-      return typeof c.attr === "string" && typeof value === "string"
-        ? { op: "setAttr", selector, attr: c.attr, value }
-        : null;
+      return typeof c.attr === "string" ? { op: "setAttr", selector, attr: c.attr, value: String(value) } : null;
     case "hide":
       return { op: "hide", selector };
     case "remove":
