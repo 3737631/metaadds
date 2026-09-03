@@ -2,6 +2,35 @@ import { getAIService } from "@/lib/ai/providers/ai-service";
 import type { StoreCandidate } from "./types";
 import { safeFetchHtml, detectShopify, extractTitle } from "./safe-fetch";
 
+type RawEntry = { name: string; url: string; snippet: string; category: string };
+
+function extractList(raw: string): RawEntry[] | null {
+  let cleaned = raw.trim();
+  const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) cleaned = fence[1].trim();
+  const arr = cleaned.match(/\[[\s\S]*\]/);
+  if (arr) {
+    const slice = cleaned.slice(cleaned.indexOf("["), cleaned.lastIndexOf("]") + 1);
+    try {
+      const v = JSON.parse(slice);
+      if (Array.isArray(v)) return v as RawEntry[];
+    } catch {
+      /* intenta con objeto envoltorio */
+    }
+  }
+  const obj = cleaned.match(/\{[\s\S]*\}/);
+  if (obj) {
+    try {
+      const v = JSON.parse(cleaned.slice(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
+      if (v && Array.isArray(v.stores)) return v.stores as RawEntry[];
+      if (v && Array.isArray(v.results)) return v.results as RawEntry[];
+    } catch {
+      /* no parseable */
+    }
+  }
+  return null;
+}
+
 function buildSearchPrompt(category: string, productName: string, productDescription: string, country: string): string {
   const niche = productName || `tiendas online de ${category}`;
   return `Actúa como un investigador de dropshipping/ecommerce.
@@ -36,20 +65,25 @@ export async function searchStores(opts: {
     opts.country ?? "es"
   );
 
-  let rawList: { name: string; url: string; snippet: string; category: string }[];
+  let rawList: RawEntry[] = [];
   try {
     const result = await service.generate({
       systemPrompt:
-        "Devuelves listas de tiendas reales. Solo respondes con JSON válido, sin markdown ni texto extra.",
+        "Devuelves listas de tiendas reales. Solo respondes con JSON vǭlido, sin markdown ni texto extra.",
       userPrompt: prompt,
       responseFormat: "json",
       temperature: 0.4,
       maxTokens: 1200,
     });
-    rawList = JSON.parse(result.content);
+    const parsed = extractList(result.content);
+    if (parsed) rawList = parsed;
   } catch (err) {
-    console.warn("[storeSearch] AI falló:", err);
+    console.warn("[storeSearch] AI fall::", err);
     return { candidates: [], note: "No pudimos buscar tiendas en este momento." };
+  }
+
+  if (rawList.length === 0) {
+    return { candidates: [], note: "La IA no devolvió una lista válida." };
   }
 
   if (!Array.isArray(rawList)) {
