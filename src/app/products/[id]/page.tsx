@@ -192,15 +192,15 @@ function MiniStat({ label, value }: { label: string; value: number }) {
 }
 
 function SignalBreakdown({ breakdown }: { breakdown: ScoreBreakdown }) {
-  const rows: Array<{ key: keyof ScoreBreakdown; label: string; weight: number }> = [
-    { key: "advertiserDiversity", label: "Advertiser diversity", weight: WEIGHTS.advertiserDiversity },
-    { key: "advertiserMomentum", label: "Advertiser momentum", weight: WEIGHTS.advertiserMomentum },
-    { key: "adMomentum", label: "Ad momentum", weight: WEIGHTS.adMomentum },
-    { key: "longevity", label: "Longevity", weight: WEIGHTS.longevity },
-    { key: "creativeDiversity", label: "Creative diversity", weight: WEIGHTS.creativeDiversity },
-    { key: "marketDiversity", label: "Market diversity", weight: WEIGHTS.marketDiversity },
-    { key: "newAdvertiserEntry", label: "New advertiser entry", weight: WEIGHTS.newAdvertiserEntry },
-    { key: "creativePersistence", label: "Creative persistence", weight: WEIGHTS.creativePersistence },
+  const rows: Array<{ key: keyof ScoreBreakdown; label: string; hint: string; weight: number }> = [
+    { key: "advertiserDiversity", label: "Advertiser diversity", hint: "Different brands running ads", weight: WEIGHTS.advertiserDiversity },
+    { key: "advertiserMomentum", label: "Advertiser momentum", hint: "New brands scaling in", weight: WEIGHTS.advertiserMomentum },
+    { key: "adMomentum", label: "Ad momentum", hint: "Rising number of recent ads", weight: WEIGHTS.adMomentum },
+    { key: "longevity", label: "Longevity", hint: "How long the product has been advertised", weight: WEIGHTS.longevity },
+    { key: "creativeDiversity", label: "Creative diversity", hint: "Different ads/creatives used", weight: WEIGHTS.creativeDiversity },
+    { key: "marketDiversity", label: "Market diversity", hint: "Distinct markets targeted", weight: WEIGHTS.marketDiversity },
+    { key: "newAdvertiserEntry", label: "New advertiser entry", hint: "Fresh brands appearing recently", weight: WEIGHTS.newAdvertiserEntry },
+    { key: "creativePersistence", label: "Creative persistence", hint: "Same creative kept alive over time", weight: WEIGHTS.creativePersistence },
   ];
   const baseScore = rows.reduce((acc, r) => acc + breakdown[r.key] * r.weight, 0);
 
@@ -218,12 +218,13 @@ function SignalBreakdown({ breakdown }: { breakdown: ScoreBreakdown }) {
           return (
             <div key={r.key}>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-dim">{r.label}</span>
+                <span className="font-medium text-text">{r.label}</span>
                 <span className="text-faint">
                   {Math.round(val)} <span className="mx-0.5">·</span> {pct}% · {Math.round(weighted)}
                 </span>
               </div>
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+              <div className="mt-0.5 text-[11px] text-dim">{r.hint}</div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
                 <div
                   className="h-full rounded-full bg-accent/80"
                   style={{ width: `${Math.min(100, val)}%` }}

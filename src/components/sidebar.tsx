@@ -16,15 +16,15 @@ import {
 } from "lucide-react";
 
 const NAV = [
-  { href: "/", label: "Overview", icon: LayoutGrid, exact: true },
-  { href: "/discover", label: "Discover", icon: Compass },
-  { href: "/winners", label: "Winners", icon: Trophy },
-  { href: "/watchlist", label: "Watchlist", icon: Bookmark },
-  { href: "/products", label: "Products", icon: Package },
-  { href: "/ads", label: "Ads", icon: Megaphone },
-  { href: "/advertisers", label: "Advertisers", icon: Building2 },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/", label: "Overview", desc: "Summary dashboard", icon: LayoutGrid, exact: true },
+  { href: "/discover", label: "Discover", desc: "Explore products", icon: Compass },
+  { href: "/winners", label: "Winners", desc: "Best scoring picks", icon: Trophy },
+  { href: "/watchlist", label: "Watchlist", desc: "Your saved items", icon: Bookmark },
+  { href: "/products", label: "Products", desc: "All tracked products", icon: Package },
+  { href: "/ads", label: "Ads", desc: "Observed ads", icon: Megaphone },
+  { href: "/advertisers", label: "Advertisers", desc: "Ad pages seen", icon: Building2 },
+  { href: "/analytics", label: "Analytics", desc: "Stats & trends", icon: BarChart3 },
+  { href: "/settings", label: "Settings", desc: "Config & data source", icon: Settings },
 ];
 
 export default function Sidebar() {
@@ -58,14 +58,17 @@ export default function Sidebar() {
               href={item.href}
               aria-label={item.label}
               className={
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors " +
+                "flex items-start gap-3 rounded-lg px-3 py-2 transition-colors " +
                 (active
                   ? "bg-surface-2 text-text ring-1 ring-border-strong"
                   : "text-dim hover:bg-surface hover:text-text")
               }
             >
-              <Icon className={"h-[18px] w-[18px] " + (active ? "text-accent2" : "")} />
-              {item.label}
+              <Icon className={"mt-0.5 h-[18px] w-[18px] shrink-0 " + (active ? "text-accent2" : "")} />
+              <span className="leading-tight">
+                <span className="block text-sm font-medium">{item.label}</span>
+                <span className="block text-[10px] font-normal text-faint">{item.desc}</span>
+              </span>
             </Link>
           );
         })}

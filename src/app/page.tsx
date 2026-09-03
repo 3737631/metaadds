@@ -7,6 +7,11 @@ import {
   Sparkles,
   ArrowRight,
   AlertTriangle,
+  Compass,
+  Trophy,
+  Bookmark,
+  BarChart3,
+  Settings,
 } from "lucide-react";
 import { getPipelineData } from "@/lib/repository";
 import { PageHeader, Card, StatCard, SectionTitle } from "@/components/ui";
@@ -45,8 +50,44 @@ export default async function OverviewPage() {
         }
       />
 
+      {/* Orientation guide */}
+      <Card className="p-5">
+        <SectionTitle title="Where is everything?" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            { icon: Compass, to: "/discover", name: "Discover", desc: "Explore all products and how they score." },
+            { icon: Trophy, to: "/winners", name: "Winners", desc: "See the highest-scoring picks first." },
+            { icon: Bookmark, to: "/watchlist", name: "Watchlist", desc: "Your saved products, one click on any card." },
+            { icon: Package, to: "/products", name: "Products", desc: "Every tracked product in a table." },
+            { icon: Megaphone, to: "/ads", name: "Ads", desc: "All observed ads and their details." },
+            { icon: Users, to: "/advertisers", name: "Advertisers", desc: "The ad pages seen behind each product." },
+            { icon: BarChart3, to: "/analytics", name: "Analytics", desc: "Charts of scores, categories and saturation." },
+            { icon: Settings, to: "/settings", name: "Settings", desc: "Data source and evidence policy." },
+          ].map((g) => (
+            <Link
+              key={g.to}
+              href={g.to}
+              className="group flex items-start gap-3 rounded-lg bg-surface-2 p-3 ring-1 ring-border transition-colors hover:ring-border-strong"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent2 ring-1 ring-accent/30">
+                <g.icon className="h-4 w-4" />
+              </span>
+              <span>
+                <span className="block text-xs font-semibold text-text">{g.name}</span>
+                <span className="block text-[11px] leading-snug text-faint">{g.desc}</span>
+              </span>
+            </Link>
+          ))}
+        </div>
+        <p className="mt-3 flex items-start gap-2 text-xs text-dim">
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent2" />
+          Start on a product's page: every number there explains itself — score, confidence, saturation and
+          each signal show what they mean and why they count.
+        </p>
+      </Card>
+
       {/* KPI row */}
-      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           label="Products tracked"
           value={formatNumber(products.length)}

@@ -25,12 +25,38 @@ const iso = (daysAgo: number) => {
   return d.toISOString().split("T")[0];
 };
 
-const img = (i: number): RawCreativeAsset => ({
+const unsplash = (photoId: string): RawCreativeAsset => ({
   type: "image",
-  url: `https://images.unsplash.com/photo-${1500000000 + i * 137}?w=800&q=70`,
+  url: `https://images.unsplash.com/${photoId}?w=900&q=70&auto=format&fit=crop`,
   width: 1080,
   height: 1350,
 });
+
+// Real, freely-licensed Unsplash photos (verified reachable). Grouped per niche.
+const SERUM_IMGS = [
+  "photo-1686121522744-dc323ce3fb26",
+  "photo-1723951174326-2a97221d3b7f",
+  "photo-1741896135512-084b251887f7",
+  "photo-1640625696922-1fd63c0b97c9",
+];
+const CUBE_IMGS = [
+  "photo-1527849214787-c99cd25c2f09",
+  "photo-1681263810102-ee12f623a5f3",
+  "photo-1570543581686-2ff4efd5df18",
+];
+const BAND_IMGS = [
+  "photo-1767605523281-8b54b3692078",
+  "photo-1767605524203-b942b7fa91b5",
+];
+const CHIP_IMGS = [
+  "photo-1708746333890-8e775f97f0a6",
+  "photo-1755415275657-e2024d4e033c",
+  "photo-1748765968997-ba9bae9cfd7b",
+  "photo-1674747497867-6cb150b3cb84",
+];
+
+const img = (pool: string[], seed: number): RawCreativeAsset =>
+  unsplash(pool[seed % pool.length]);
 
 const video = (url: string): RawCreativeAsset => ({
   type: "video",
@@ -101,7 +127,7 @@ function skinSerumAds(): RawAd[] {
   ];
   return brands.flatMap((b, i) =>
     b.starts.map((s, j) =>
-      mkAd("serum-" + b.id + "-" + j, b, s, lp, "Revitalizing Vitamin C Serum", "Serum", j)
+      mkAd("serum-" + b.id + "-" + j, b, s, lp, "Revitalizing Vitamin C Serum", "Serum", j, SERUM_IMGS)
     )
   );
 }
@@ -115,7 +141,7 @@ function travelCubeAds(): RawAd[] {
   ];
   return brands.flatMap((b, i) =>
     b.starts.map((s, j) =>
-      mkAd("cube-" + b.id + "-" + j, b, s, lp, "Ultimate Packing Cube Set", "Packing Cubes", j)
+      mkAd("cube-" + b.id + "-" + j, b, s, lp, "Ultimate Packing Cube Set", "Packing Cubes", j, CUBE_IMGS)
     )
   );
 }
@@ -130,7 +156,7 @@ function resistanceBandAds(): RawAd[] {
   ];
   return brands.flatMap((b, i) =>
     b.starts.map((s, j) =>
-      mkAd("band-" + b.id + "-" + j, b, s, lp, "Pro Resistance Band Set", "Resistance Bands", j)
+      mkAd("band-" + b.id + "-" + j, b, s, lp, "Pro Resistance Band Set", "Resistance Bands", j, BAND_IMGS)
     )
   );
 }
@@ -145,7 +171,7 @@ function popChipsAds(): RawAd[] {
   ];
   return brands.flatMap((b, i) =>
     b.starts.map((s, j) =>
-      mkAd("chips-" + b.id + "-" + j, b, s, lp, "Protein Popped Chips", "Protein Chips", j)
+      mkAd("chips-" + b.id + "-" + j, b, s, lp, "Protein Popped Chips", "Protein Chips", j, CHIP_IMGS)
     )
   );
 }
@@ -158,7 +184,8 @@ function mkAd(
   landingPage: string,
   headline: string,
   productCategory: string,
-  variant: number
+  variant: number,
+  imgPool: string[]
 ): RawAd {
   adSeq++;
   const startDate = iso(startDaysAgo);
@@ -171,8 +198,8 @@ function mkAd(
     ["facebook", "instagram", "messenger"],
   ];
   const creatives: RawCreativeAsset[] = [
-    img(variant % 8 + 1),
-    img((variant % 8) + 3),
+    img(imgPool, variant),
+    img(imgPool, variant + 1),
   ];
   if (variant % 2 === 0) {
     creatives.push(video("/assets/demo-creative.mp4"));
