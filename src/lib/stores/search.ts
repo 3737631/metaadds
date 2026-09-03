@@ -24,14 +24,15 @@ function looksLikeArticle(snippet: string, title: string): boolean {
 function buildQueries(productName: string, category: string, country: string): string[] {
   const terms = productName || category;
   const market = country && country !== "es" ? ` ${country}` : "";
-  // Pocas y buenas: menos consultas = respuesta mucho más rápida sin perder calidad.
-  const suff = [" tienda online", " shop", " myshopify"];
+  // Pocas y buenas: priorizamos tiendas reales de Shopify (marcas premium).
+  const suff = [" tienda online", " myshopify.com", " shop"];
   const queries: string[] = [];
   for (const s of suff) queries.push(`${terms}${s}${market}`);
+  if (country && country === "es") queries.push(`${terms} tienda online en España ${market}`);
   return queries;
 }
 
-/** Puntuación observable (no ventas): coincidencia + señales ecommerce. */
+/** Puntuación observable (no ventas): coincidencia + señales de tienda premium. */
 function scoreCandidate(
   result: SearchResult,
   productName: string,
@@ -42,11 +43,11 @@ function scoreCandidate(
   const terms = productName.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
   if (terms.length > 0) {
     const hits = terms.filter((t) => text.includes(t)).length;
-    score += (hits / terms.length) * 40;
+    score += (hits / terms.length) * 30;
   }
-  score += Math.min(ecommerceSignals, 4) * 10; // hasta 40 por señales
+  score += Math.min(ecommerceSignals, 8) * 7; // hasta 56 por señales de tienda premium
   if (result.domain.endsWith(".com") || result.domain.endsWith(".es") || result.domain.endsWith(".co")) {
-    score += 10;
+    score += 8;
   }
   return Math.min(Math.round(score), 95);
 }
@@ -140,17 +141,23 @@ export async function searchStores(opts: {
     for (const c of checks) if (c) candidates.push(c);
   }
 
-  // Ranking por señales observables desc.
-  candidates.sort((a, b) => (b.competitorScore ?? 0) - (a.competitorScore ?? 0));
+  // Ranking por señales observables desc. Priorizamos tiendas reales de
+  // Shopify (aspecto marcas 'premium', plantillas de Shopify) tal y como pidió
+  // el usuario, y ponemos primero la que mejor pinta por señales.
+  const shopify = candidates.filter((c) => c.shopify);
+  const list = shopify.length > 0 ? shopify : candidates;
+  list.sort((a, b) => (b.competitorScore ?? 0) - (a.competitorScore ?? 0));
 
   const note =
-    candidates.length === 0
+    list.length === 0
       ? "No hemos encontrado tiendas verificables para esta búsqueda."
-      : "";
-  return { candidates: candidates.slice(0, 10), note, provider: activeSearchProviderName() };
+      : shopify.length === 0
+        ? "No se encontraron tiendas Shopify verificables; mostramos las mejores encontradas."
+        : "";
+  return { candidates: list.slice(0, 10), note, provider: activeSearchProviderName() };
 }
 
-/** Cuenta señales de ecommerce observables en el HTML. */
+/** Cuenta señales de ecommerce y 'aspecto premium' observables en el HTML. */
 function ecommerceSignals(html: string): number {
   let n = 0;
   if (/<h[1-4][^>]*>(?:<[^>]+>)*\s*[A-Za-zÁÉÍÓÚÑáéíóúñ][^<]{2,}/i.test(html)) n++; // heading con texto
@@ -159,5 +166,12 @@ function ecommerceSignals(html: string): number {
   if (/cdn\.shopify\.com|\/cdn\/shop\/|shopify\.com|woocommerce|wordpress|prestashop|magento|shopify/i.test(html)) n++;
   if (/<nav|navbar|header/i.test(html)) n++;
   if (/menu|colección|producto|product|collection|shop|tienda/i.test(html)) n++;
+  // Señales premium / tienda completa y trabajada:
+  if (/<section|<main|role=["']main["']/i.test(html)) n++; // estructura semántica
+  if (/(?:application\/ld\+json|"@type":\s*"Product"|itemscope itemtype="[^"]*Product")/i.test(html)) n++; // marcado de producto
+  if (/<img[^>]+src=/i.test(html) && (html.match(/<img/g)?.length ?? 0) >= 6) n++; // muchas imágenes
+  if (/social proof|reseñas|reviews|testimonios|opiniones del cliente/i.test(html)) n++; // prueba social
+  if (/suscrip|newsletter|email/i.test(html)) n++; // captación de email
+  if (/hotmart|tiktok|instagram|facebook|youtube/i.test(html)) n++; // presencia social
   return n;
 }
