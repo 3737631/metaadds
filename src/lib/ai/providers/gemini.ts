@@ -5,7 +5,7 @@ import type { AIProvider, AIProviderInput, AIProviderResult } from "./types";
  * La clave se obtiene gratis (sin tarjeta) en Google AI Studio
  * -> https://aistudio.google.com/apikey
  *
- * Modelo por defecto: gemini-2.0-flash (incluido en el nivel gratuito).
+ * Modelo por defecto: gemini-3.6-flash (incluido en el nivel gratuito actual).
  * Si el prompt pide JSON, se usa responseMimeType application/json.
  */
 export class GeminiProvider implements AIProvider {
@@ -19,7 +19,7 @@ export class GeminiProvider implements AIProvider {
   }
 
   async generate(input: AIProviderInput): Promise<AIProviderResult> {
-    const model = input.model ?? "gemini-2.0-flash";
+    const model = input.model ?? "gemini-3.6-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
 
     const parts = [{ text: input.userPrompt }];
