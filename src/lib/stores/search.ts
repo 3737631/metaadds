@@ -1,50 +1,56 @@
-import { getAIService } from "@/lib/ai/providers/ai-service";
+import type { SearchResult } from "@/lib/search/provider";
+import { getSearchProvider, activeSearchProviderName, missingSearchKeys } from "@/lib/search";
+import { isBlockedDomain, normalizeSearchUrl } from "@/lib/search/provider";
 import type { StoreCandidate } from "./types";
 import { safeFetchHtml, detectShopify, extractTitle } from "./safe-fetch";
 
-type RawEntry = { name: string; url: string; snippet: string; category: string };
+/**
+ * Buscador de tiendas REAL. Usa un proveedor de búsqueda web real
+ * (Serper si hay SEARCH_API_KEY, si no DuckDuckGo) para obtener URLs que
+ * existen de verdad, filtra marketplaces/blogs, deduplica por dominio y
+ * verifica cada una en vivo. La IA NO inventa resultados.
+ */
 
-function extractList(raw: string): RawEntry[] | null {
-  let cleaned = raw.trim();
-  const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) cleaned = fence[1].trim();
-  const arr = cleaned.match(/\[[\s\S]*\]/);
-  if (arr) {
-    const slice = cleaned.slice(cleaned.indexOf("["), cleaned.lastIndexOf("]") + 1);
-    try {
-      const v = JSON.parse(slice);
-      if (Array.isArray(v)) return v as RawEntry[];
-    } catch {
-      /* intenta con objeto envoltorio */
-    }
-  }
-  const obj = cleaned.match(/\{[\s\S]*\}/);
-  if (obj) {
-    try {
-      const v = JSON.parse(cleaned.slice(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
-      if (v && Array.isArray(v.stores)) return v.stores as RawEntry[];
-      if (v && Array.isArray(v.results)) return v.results as RawEntry[];
-    } catch {
-      /* no parseable */
-    }
-  }
-  return null;
+const BLOCK_TERMS = [
+  "blog", "noticia", "artículo", "wiki", "reddit", "forum", "foro",
+  "reviews", "comparativa", "ranking", "top 10", "mejores",
+];
+
+function looksLikeArticle(snippet: string, title: string): boolean {
+  const s = `${title} ${snippet}`.toLowerCase();
+  return BLOCK_TERMS.some((t) => s.includes(t));
 }
 
-function buildSearchPrompt(category: string, productName: string, productDescription: string, country: string): string {
-  const niche = productName || `tiendas online de ${category}`;
-  return `Actúa como un investigador de dropshipping/ecommerce.
-Menciona hasta 12 tiendas online REALES y bien conocidas o fiables que vendan productos del nicho «${niche}» ${
-    productName ? `(producto concreto: ${productName})` : ""
+function buildQueries(productName: string, category: string, country: string): string[] {
+  const base = productName || `tienda online ${category}`;
+  const market = country && country !== "es" ? ` ${country}` : "";
+  const queries = new Set<string>();
+  queries.add(`${base} tienda online${market}`);
+  queries.add(`${base} comprar${market}`);
+  queries.add(`${base} shop${market}`);
+  queries.add(`${base} site`);
+  queries.add(`${base} myshopify`);
+  return Array.from(queries).slice(0, 5);
+}
+
+/** Puntuación observable (no ventas): coincidencia + señales ecommerce. */
+function scoreCandidate(
+  result: SearchResult,
+  productName: string,
+  ecommerceSignals: number
+): number {
+  let score = 0;
+  const text = `${result.title} ${result.snippet}`.toLowerCase();
+  const terms = productName.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+  if (terms.length > 0) {
+    const hits = terms.filter((t) => text.includes(t)).length;
+    score += (hits / terms.length) * 40;
   }
-${country ? `enfocadas o activas en el mercado ${country.toUpperCase()}.` : ""}
-
-Para cada una devuelve: nombre de la tienda, la URL de su dominio principal (sin https:// obligatorio, pero con dominio real), y un snippet corto que diga qué venden.
-
-Devuelve SOLO JSON con esta forma:
-[ { "name": string, "url": string, "snippet": string, "category": "${category}" } ]
-
-IMPORTANTE: solo incluye tiendas que tengas alta confianza de que existen. No inventes dominios.`;
+  score += Math.min(ecommerceSignals, 4) * 10; // hasta 40 por señales
+  if (result.domain.endsWith(".com") || result.domain.endsWith(".es") || result.domain.endsWith(".co")) {
+    score += 10;
+  }
+  return Math.min(Math.round(score), 95);
 }
 
 export async function searchStores(opts: {
@@ -52,75 +58,99 @@ export async function searchStores(opts: {
   productName?: string;
   productDescription?: string;
   country?: string;
-}): Promise<{ candidates: StoreCandidate[]; note: string }> {
-  const service = getAIService();
-  if (!service.available) {
-    return { candidates: [], note: "No hay proveedores de IA configurados." };
-  }
+}): Promise<{ candidates: StoreCandidate[]; note: string; provider: string; missing?: string[] }> {
+  const provider = getSearchProvider();
+  const queries = buildQueries(opts.productName ?? "", opts.category, opts.country ?? "es");
 
-  const prompt = buildSearchPrompt(
-    opts.category,
-    opts.productName ?? "",
-    opts.productDescription ?? "",
-    opts.country ?? "es"
-  );
+  const seen = new Set<string>();
+  const results: SearchResult[] = [];
 
-  let rawList: RawEntry[] = [];
-  try {
-    const result = await service.generate({
-      systemPrompt:
-        "Devuelves listas de tiendas reales. Solo respondes con JSON vǭlido, sin markdown ni texto extra.",
-      userPrompt: prompt,
-      responseFormat: "json",
-      temperature: 0.4,
-      maxTokens: 1200,
-    });
-    const parsed = extractList(result.content);
-    if (parsed) rawList = parsed;
-  } catch (err) {
-    console.warn("[storeSearch] AI fall::", err);
-    return { candidates: [], note: "No pudimos buscar tiendas en este momento." };
-  }
-
-  if (rawList.length === 0) {
-    return { candidates: [], note: "La IA no devolvió una lista válida." };
-  }
-
-  if (!Array.isArray(rawList)) {
-    return { candidates: [], note: "La IA no devolvió una lista válida." };
-  }
-
-  // Verificar cada dominio en vivo: solo se incluyen tiendas reales que cargan.
-  const candidates: StoreCandidate[] = [];
-  for (const item of rawList.slice(0, 12)) {
-    if (!item.url) continue;
-    let url = item.url.trim();
-    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-
-    const fetched = await safeFetchHtml(url);
-    if (!fetched || !fetched.ok || !fetched.html) {
-      // Sin verificación en vivo: descartar como "no verificada" en lugar de falsa
-      continue;
+  // Ejecutar búsquedas reales de forma secuencial, tolerando errores aislados.
+  let searchErrors = 0;
+  for (const q of queries) {
+    try {
+      const res = await provider.search(q);
+      for (const r of res) {
+        if (isBlockedDomain(r.url)) continue;
+        if (looksLikeArticle(r.snippet, r.title)) continue;
+        const dom = r.domain;
+        if (seen.has(dom)) continue;
+        seen.add(dom);
+        results.push(r);
+      }
+    } catch {
+      searchErrors++;
     }
-
-    const dom = new URL(fetched.finalUrl).hostname;
-    candidates.push({
-      id: dom.replace(/\W+/g, "-") + "-" + candidates.length,
-      name: item.name || dom,
-      url: "https://" + dom,
-      domain: dom,
-      category: item.category || opts.category,
-      country: (opts.country ?? "es").toUpperCase(),
-      similarity: 0,
-      shopify: detectShopify(fetched.html),
-      verified: true,
-      title: extractTitle(fetched.html),
-      snippet: item.snippet || "",
-    });
   }
 
-  return {
-    candidates,
-    note: candidates.length === 0 ? "No se encontraron tiendas verificables para ese nicho." : "",
-  };
+  if (results.length === 0) {
+    const missing = missingSearchKeys();
+    const note =
+      missing.length > 0
+        ? `Falta configurar la búsqueda real: ${missing.join(", ")}`
+        : searchErrors === queries.length
+          ? "No pudimos conectar con el buscador web en este momento."
+          : "No hemos encontrado tiendas verificables para esta búsqueda.";
+    return { candidates: [], note, provider: activeSearchProviderName(), missing };
+  }
+
+  // Verificar cada dominio en vivo (parcialmente en paralelo; se incluyen
+  // los que cargan realmente y parecen ecommerce).
+  const candidates: StoreCandidate[] = [];
+  const CHUNK = 4;
+  for (let i = 0; i < results.length; i += CHUNK) {
+    const chunk = results.slice(i, i + CHUNK);
+    const checks = await Promise.all(
+      chunk.map(async (r): Promise<StoreCandidate | null> => {
+        try {
+          const fetched = await safeFetchHtml(normalizeSearchUrl(r.url));
+          if (!fetched || !fetched.ok || !fetched.html) return null;
+          if (fetched.html.length < 500) return null; // página vacía
+          const signals = ecommerceSignals(fetched.html);
+          if (signals === 0) return null; // no parece tienda
+          const platform = detectShopify(fetched.html) ? "shopify" : "unknown";
+          const dom = new URL(fetched.finalUrl).hostname.replace(/^www\./, "");
+          return {
+            id: dom.replace(/\W+/g, "-"),
+            name: r.title || dom,
+            url: normalizeSearchUrl(fetched.finalUrl),
+            domain: dom,
+            category: opts.category,
+            country: (opts.country ?? "es").toUpperCase(),
+            similarity: 0,
+            competitorScore: scoreCandidate(r, opts.productName ?? "", signals),
+            shopify: platform === "shopify",
+            platform,
+            verified: true,
+            title: extractTitle(fetched.html) || r.title,
+            snippet: r.snippet || "",
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+    for (const c of checks) if (c) candidates.push(c);
+  }
+
+  // Ranking por señales observables desc.
+  candidates.sort((a, b) => (b.competitorScore ?? 0) - (a.competitorScore ?? 0));
+
+  const note =
+    candidates.length === 0
+      ? "No hemos encontrado tiendas verificables para esta búsqueda."
+      : "";
+  return { candidates: candidates.slice(0, 10), note, provider: activeSearchProviderName() };
+}
+
+/** Cuenta señales de ecommerce observables en el HTML. */
+function ecommerceSignals(html: string): number {
+  let n = 0;
+  if (/<h[1-4][^>]*>(?:<[^>]+>)*\s*[A-Za-zÁÉÍÓÚÑáéíóúñ][^<]{2,}/i.test(html)) n++; // heading con texto
+  if (/€|EUR|&euro;|\$|USD|price|precio/i.test(html)) n++;
+  if (/add to cart|añadir al carrito|add_to_cart|cart|carrito/i.test(html)) n++;
+  if (/cdn\.shopify\.com|\/cdn\/shop\/|shopify\.com|woocommerce|wordpress|prestashop|magento|shopify/i.test(html)) n++;
+  if (/<nav|navbar|header/i.test(html)) n++;
+  if (/menu|colección|producto|product|collection|shop|tienda/i.test(html)) n++;
+  return n;
 }

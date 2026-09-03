@@ -6,7 +6,9 @@ export interface StoreCandidate {
   category: string;
   country: string;
   similarity: number;
+  competitorScore?: number;
   shopify: boolean;
+  platform?: string;
   verified: boolean;
   title: string;
   snippet: string;
