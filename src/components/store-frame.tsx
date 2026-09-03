@@ -185,7 +185,10 @@ export default function StoreFrame({
     const marker = "</body>";
     const idx = html.lastIndexOf(marker);
     if (idx === -1) return html;
-    return html.slice(0, idx) + `<script>${EDITOR_SCRIPT}<\\/script>` + html.slice(idx);
+    // Usamos '' + concatenación (no template literal) para que el cierre sea un `</script>` REAL
+    // que cierre la etiqueta en el HTML del srcdoc; un `<\/script>` escapado dejaría el <script>
+    // abierto y el parser se tragaría el resto del HTML (no ejecutaría nuestro editor).
+    return html.slice(0, idx) + "<script>" + EDITOR_SCRIPT + "</script>" + html.slice(idx);
   }, [html]);
 
   const scale = width > 0 ? width / BASE_WIDTH : 1;
