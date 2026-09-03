@@ -99,33 +99,84 @@ export async function chatEditStore(opts: {
   const json = repairJson(result.content);
   if (!json) return null;
   const root = json as Record<string, unknown>;
-  const opsArr = Array.isArray(root.ops) ? (root.ops as ChatOp[]) : [];
+  const opsArr = Array.isArray(root.ops) ? (root.ops as unknown[]) : [];
+  const ops = opsArr
+    .map((o) => toChatOp(o))
+    .filter((o): o is ChatOp => o !== null);
+  if (ops.length === 0) {
+    console.error("[/chat] sin ops aplicables. Respuesta IA:", result.content.slice(0, 3000));
+  }
   return {
     reply: typeof root.reply === "string" ? root.reply : "He aplicado tus cambios.",
-    ops: opsArr.filter(isChatOp),
+    ops,
   };
 }
 
-function isChatOp(o: unknown): o is ChatOp {
-  if (!o || typeof o !== "object") return false;
+/** Normaliza un nombre de operación que la IA pueda escribir de varias formas. */
+function normOp(op: string): string {
+  const key = op.toLowerCase().replace(/[\s_-]/g, "");
+  switch (key) {
+    case "replacetext":
+    case "settext":
+    case "setcontent":
+      return "replaceText";
+    case "replaceinner":
+      return "replaceInner";
+    case "setstyle":
+    case "style":
+    case "setcss":
+      return "setStyle";
+    case "setimage":
+    case "image":
+    case "setimg":
+      return "setImage";
+    case "setattr":
+    case "setattribute":
+      return "setAttr";
+    case "hide":
+    case "hidden":
+      return "hide";
+    case "remove":
+    case "delete":
+    case "rm":
+      return "remove";
+    default:
+      return op;
+  }
+}
+
+/** Devuelve un ChatOp canónico si `o` es una op válida (tolera aliases de campos). */
+function toChatOp(o: unknown): ChatOp | null {
+  if (!o || typeof o !== "object") return null;
   const c = o as Record<string, unknown>;
-  const op = c.op;
-  if (typeof op !== "string" || typeof c.selector !== "string") return false;
+  const op0 = c.op;
+  if (typeof op0 !== "string") return null;
+  const op = normOp(op0);
+  let selector: unknown = c.selector;
+  if (typeof selector !== "string") selector = c.sel;
+  if (typeof selector !== "string" || !selector.trim()) return null;
+  let value: unknown = c.value;
+  if (typeof value !== "string") value = c.text;
   switch (op) {
     case "replaceText":
-      return typeof c.text === "string";
+      return typeof value === "string" ? { op: op as "replaceText", selector, text: value } : null;
     case "replaceInner":
-      return typeof c.html === "string";
+      return { op: "replaceInner", selector, html: typeof value === "string" ? value : "" };
     case "setStyle":
-      return typeof c.prop === "string" && typeof c.value === "string";
+      return typeof c.prop === "string" && typeof value === "string"
+        ? { op: "setStyle", selector, prop: c.prop, value }
+        : null;
     case "setImage":
-      return typeof c.src === "string";
+      return typeof value === "string" ? { op: "setImage", selector, src: value } : null;
     case "setAttr":
-      return typeof c.attr === "string" && typeof c.value === "string";
+      return typeof c.attr === "string" && typeof value === "string"
+        ? { op: "setAttr", selector, attr: c.attr, value }
+        : null;
     case "hide":
+      return { op: "hide", selector };
     case "remove":
-      return true;
+      return { op: "remove", selector };
     default:
-      return false;
+      return null;
   }
 }
