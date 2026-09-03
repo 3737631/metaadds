@@ -1,6 +1,8 @@
 import { getPipelineData } from "@/lib/repository";
 import ShopifyConnect from "@/components/shopify-connect";
 
+export const dynamic = "force-dynamic";
+
 export default async function AjustesPage() {
   const data = await getPipelineData();
   const { provider, scored } = data;

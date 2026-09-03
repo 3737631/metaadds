@@ -60,7 +60,7 @@ export default function Nav() {
           })}
         </nav>
         <div className="border-t border-border p-3 text-[11px] text-faint">
-          Señales publicitarias observadas en Meta. Datos demo hasta conectar con Meta.
+          Señales publicitarias reales consultadas en vivo desde la biblioteca de anuncios de Meta.
         </div>
       </aside>
 

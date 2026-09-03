@@ -101,6 +101,13 @@ export class MetaLiveProvider implements DataProvider {
     console.warn(
       `[meta-live] términos=${this.defaultSearchTerms.length} resultados_crudos=${attempted} ads_unicos=${ads.length} ms=${Date.now() - t0}`
     );
+    if (ads.length === 0) {
+      // La API en vivo no devolvió ningún anuncio real (términos agotados,
+      // throttle de Meta o red vacía). Lanzamos para que el repositorio
+      // caiga al siguiente proveedor (snapshot/demo) en vez de mostrar
+      // una página vacía sin explicación.
+      throw new Error("Meta en vivo devolvió 0 anuncios reales");
+    }
     return ads;
   }
 
