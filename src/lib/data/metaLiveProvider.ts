@@ -156,7 +156,16 @@ export class MetaLiveProvider implements DataProvider {
 
       const retryable =
         res.status === 500 || res.status === 429 || res.status === 502 || res.status === 503;
-      console.warn(`[meta-live] término "${searchTerm}" status=${res.status} (intento ${attempt}, retryable=${retryable})`);
+      let bodyPreview = "";
+      try {
+        const txt = (await res.clone().text()).slice(0, 160);
+        bodyPreview = txt.replace(/\s+/g, " ").trim();
+      } catch {
+        /* sin cuerpo */
+      }
+      console.warn(
+        `[meta-live] término "${searchTerm}" status=${res.status} (intento ${attempt}, retryable=${retryable}) cuerpo=${bodyPreview}`
+      );
       if (!retryable || attempt === maxAttempts) {
         break;
       }
