@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { loadShopifyCreds } from "./shopify-connect";
 import {
   Search,
   Store,
@@ -16,9 +17,10 @@ import {
   Tablet,
   Smartphone,
   PenLine,
+  ChevronDown,
 } from "lucide-react";
 
-type Category = { id: string; label: string; emoji: string };
+type Category = { id: string; label: string };
 
 interface StoreCandidate {
   id: string;
@@ -89,6 +91,8 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [error, setError] = useState<string | null>(null);
   const [brandName, setBrandName] = useState("");
   const [notif, setNotif] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploaded, setUploaded] = useState<string | null>(null);
 
   function flash(msg: string) {
     setNotif(msg);
@@ -219,6 +223,35 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     }
   }
 
+  async function doUpload() {
+    if (!theme) return;
+    setUploading(true);
+    setUploaded(null);
+    setError(null);
+    const creds = loadShopifyCreds();
+    if (!creds) {
+      setError("Primero conecta tu tienda en Ajustes (dominio y token de admin).");
+      setUploading(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/shopify/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop: creds.shop, accessToken: creds.token, theme }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(json?.error?.message || "No se pudo subir el tema.");
+      }
+      setUploaded(json?.data?.message ?? "Tema subido.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al subir el tema.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {notif && (
@@ -233,55 +266,63 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
         </div>
       )}
 
-      {/* PASO 0: categoría / temática */}
+      {/* PASO 0: categoría / temática — desplegable Apple-style, siempre visible */}
       <div className="text-center">
         <div className="inline-flex items-center justify-center gap-2 text-2xl font-bold tracking-tight text-text sm:text-3xl">
           <Store className="h-7 w-7 text-accent2" /> Crear tienda
         </div>
         <p className="mx-auto mt-2 max-w-sm text-sm text-dim">
-          Elige una temática, encuentra tiendas virales de ese nicho y crea tu tienda imitando su estructura con tu propia marca.
+          Elige una temática, mira las tiendas que están funcionando y crea la tuya con tu propia marca.
         </p>
       </div>
 
-      {step === "topic" || step === "search" ? (
-        <>
-          <div>
-            <h2 className="text-lg font-semibold text-text">¿Qué temática?</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="flex flex-col gap-3">
+        <label className="block text-left">
+          <span className="text-xs font-medium text-dim">Temática</span>
+          <div className="relative mt-1">
+            <select
+              value={topic?.label ?? ""}
+              onChange={(e) => {
+                const c = categories.find((x) => x.label === e.target.value);
+                setTopic(c ?? null);
+                setStep(c ? "topic" : "topic");
+                setCandidates([]);
+                setSearchNote("");
+                setSelected(null);
+                setAnalysis(null);
+              }}
+              className="w-full appearance-none rounded-2xl border border-border bg-surface px-4 py-3.5 text-base font-semibold text-text focus:border-accent focus:outline-none"
+            >
+              <option value="" disabled>
+                Elige una temática
+              </option>
               {categories.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setTopic(c)}
-                  className={
-                    "flex flex-col items-center justify-center gap-1.5 rounded-2xl border p-4 text-center transition-colors " +
-                    (topic?.id === c.id
-                      ? "border-accent bg-accent/10"
-                      : "border-border bg-surface hover:border-accent/40")
-                  }
-                >
-                  <span className="text-2xl">{c.emoji}</span>
-                  <span className="text-xs font-medium text-text">{c.label}</span>
-                </button>
+                <option key={c.id} value={c.label}>
+                  {c.label}
+                </option>
               ))}
-            </div>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-dim" />
           </div>
+        </label>
 
-          <button
-            type="button"
-            onClick={doSearch}
-            disabled={!topic || searching}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-base font-semibold text-white shadow-lg shadow-accent/25 transition-transform active:scale-[0.98] hover:brightness-110 disabled:opacity-40"
-          >
-            {searching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
-            {searching ? "Buscando tiendas..." : "BUSCAR TIENDAS"}
-          </button>
-          {searching && (
-            <p className="text-center text-xs text-dim">
-              Buscando tiendas reales de {topic?.label}... puede tardar unos segundos.
-            </p>
-          )}
-        </>
+        <button
+          type="button"
+          onClick={doSearch}
+          disabled={!topic || searching}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-base font-semibold text-white shadow-lg shadow-accent/25 transition-transform active:scale-[0.98] hover:brightness-110 disabled:opacity-40"
+        >
+          {searching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
+          {searching ? "Buscando tiendas..." : "VER TIENDAS QUE FUNCIONAN"}
+        </button>
+      </div>
+
+      {step === "topic" || step === "search" ? (
+        <p className="text-center text-xs text-dim">
+          {searching
+            ? `Buscando tiendas reales de ${topic?.label}... puede tardar unos segundos.`
+            : "Selecciona una temática y pulsa el botón para ver tiendas reales verificadas."}
+        </p>
       ) : null}
 
       {/* PASO 1: resultados */}
@@ -461,12 +502,28 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
                 {downloading ? "Generando ZIP..." : "DESCARGAR TEMA SHOPIFY (ZIP)"}
               </button>
 
-              <a
-                href="/ajustes"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3.5 text-sm font-semibold text-dim hover:text-text"
+              <button
+                type="button"
+                onClick={doUpload}
+                disabled={uploading}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
               >
-                <Check className="h-4 w-4" /> Conectar Shopify para subir el tema
-              </a>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {uploading ? "Subiendo a tu tienda..." : "SUBIR A MI TIENDA SHOPIFY"}
+              </button>
+              {uploaded && (
+                <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-400">
+                  {uploaded}
+                </p>
+              )}
+              {!loadShopifyCreds() && (
+                <a
+                  href="/ajustes"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-dim hover:text-text"
+                >
+                  Conectar mi tienda (dominio y token) en Ajustes
+                </a>
+              )}
             </div>
 
             {/* Preview */}

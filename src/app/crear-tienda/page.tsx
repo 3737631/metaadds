@@ -5,7 +5,6 @@ export default async function CrearTiendaPage() {
   const cats = CATEGORIES.filter((c) => c.id !== "todos").map((c) => ({
     id: c.id,
     label: c.label,
-    emoji: c.emoji,
   }));
 
   return <CrearTienda categories={cats} />;

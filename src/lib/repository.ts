@@ -1,6 +1,7 @@
 import type { DataProvider } from "@/lib/data/provider";
 import { MockDataProvider } from "@/lib/data/mockData";
 import { MetaSnapshotProvider, hasRealData } from "@/lib/data/metaProvider";
+import { MetaLiveProvider, hasLiveMetaToken } from "@/lib/data/metaLiveProvider";
 import { normalizeAds } from "@/lib/normalize";
 import { deduplicateAds } from "@/lib/dedupe";
 import { resolveProducts } from "@/lib/entityResolution";
@@ -12,6 +13,7 @@ import type {
   NormalizedAd,
   Product,
   Advertiser,
+  RawAd,
   ProductScore,
   ScoredProduct,
   DataSourceInfo,
@@ -82,6 +84,10 @@ export interface PipelineResult {
 }
 
 export function getProviders(): DataProvider[] {
+  // Prioridad: datos reales en vivo (token) > snapshot local > demo.
+  if (hasLiveMetaToken()) {
+    return [new MetaLiveProvider(), new MetaSnapshotProvider(), new MockDataProvider()];
+  }
   if (hasRealData()) return [new MetaSnapshotProvider(), new MockDataProvider()];
   return [new MockDataProvider(), new MetaSnapshotProvider()];
 }
@@ -148,13 +154,36 @@ const pipelineCache = new Map<string, PipelineResult>();
  * (normalize → dedupe → entity resolve → signal → scoring → ranking) over a
  * data provider. This is the single shared scoring path for demo AND real data.
  */
-export async function getPipelineData(providerId = "demo"): Promise<PipelineResult> {
-  const cached = pipelineCache.get(providerId);
+export async function getPipelineData(providerId?: string): Promise<PipelineResult> {
+  // Si no se pide un proveedor concreto, eligimos el mejor disponible en orden
+  // de prioridad: datos reales en vivo > snapshot > demo.
+  const effectiveId = providerId ?? (hasLiveMetaToken() ? "meta-live" : "demo");
+  const cached = pipelineCache.get(effectiveId);
   if (cached) return cached;
 
   const providers = getProviders();
-  const provider = providers.find((p) => p.info.id === providerId) ?? providers[0];
-  const { raw, advertiserList } = await loadProviderData(provider);
+  const ordered =
+    providers.find((p) => p.info.id === effectiveId) ?? providers[0];
+
+  // Probamos los proveedores en orden de prioridad; si uno falla (p.ej. el
+  // token de Meta expiró o la API no responde), caemos al siguiente en vez de
+  // romper la página.
+  let chosen = ordered;
+  let loaded: { raw: RawAd[]; advertiserList: Advertiser[] } | null = null;
+  for (const candidate of [ordered, ...providers.filter((p) => p !== ordered)]) {
+    try {
+      loaded = await loadProviderData(candidate);
+      chosen = candidate;
+      break;
+    } catch (err) {
+      console.warn(`[repository] Proveedor ${candidate.info.id} falló:`, err);
+      loaded = null;
+    }
+  }
+  if (!loaded) {
+    loaded = { raw: [], advertiserList: [] };
+  }
+  const { raw, advertiserList } = loaded;
 
   const normalized = normalizeAds(raw);
   const beforeDedupe = normalized.length;
@@ -205,7 +234,7 @@ export async function getPipelineData(providerId = "demo"): Promise<PipelineResu
       creativeCount,
       isActiveShare: activeShare,
       clusterConfidence: cluster?.confidence ?? 50,
-      dataProviderIsDemo: provider.info.isDemo,
+      dataProviderIsDemo: chosen.info.isDemo,
     });
     const duplicateAdRatio = duplicatesRemoved / Math.max(1, beforeDedupe);
     const scoring = computeWinner({
@@ -248,7 +277,7 @@ export async function getPipelineData(providerId = "demo"): Promise<PipelineResu
 
   const lastSync: SyncRun = {
     id: "sync-" + Date.now(),
-    provider: provider.info.id,
+    provider: chosen.info.id,
     status: "completed",
     startedAt: new Date(Date.now() - 1000).toISOString(),
     finishedAt: new Date().toISOString(),
@@ -263,11 +292,11 @@ export async function getPipelineData(providerId = "demo"): Promise<PipelineResu
     normalizedAds: deduped,
     advertisers: advertiserList,
     scored,
-    provider: provider.info,
+provider: chosen.info,
     duplicatesRemoved,
     lastSync,
   };
-  pipelineCache.set(providerId, result);
+pipelineCache.set(effectiveId, result);
   return result;
 }
 
