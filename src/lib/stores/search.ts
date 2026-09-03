@@ -24,10 +24,11 @@ function looksLikeArticle(snippet: string, title: string): boolean {
 function buildQueries(productName: string, category: string, country: string): string[] {
   const terms = productName || category;
   const market = country && country !== "es" ? ` ${country}` : "";
-  const suff = [" tienda online", " comprar", " shop", " site", " myshopify"];
-  const queries = new Set<string>();
-  for (const s of suff) queries.add(`${terms}${s}${market}`);
-  return Array.from(queries).slice(0, 5);
+  // Pocas y buenas: menos consultas = respuesta mucho más rápida sin perder calidad.
+  const suff = [" tienda online", " shop", " myshopify"];
+  const queries: string[] = [];
+  for (const s of suff) queries.push(`${terms}${s}${market}`);
+  return queries;
 }
 
 /** Puntuación observable (no ventas): coincidencia + señales ecommerce. */
@@ -63,13 +64,11 @@ export async function searchStores(opts: {
   const results: SearchResult[] = [];
 
   // Ejecutar búsquedas reales de forma secuencial, tolerando errores aislados.
-  // DuckDuckGo tiende a limitar (202) si recibe varias peticiones seguidas,
-  // así que espaciamos las consultas y reintentamos una vez con backoff.
   let searchErrors = 0;
   for (const q of queries) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, 1200));
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 600));
         const res = await provider.search(q);
         for (const r of res) {
           if (isBlockedDomain(r.url)) continue;
@@ -82,10 +81,10 @@ export async function searchStores(opts: {
         break; // éxito: no reintentar
       } catch {
         if (attempt === 1) searchErrors++;
-        else await new Promise((r) => setTimeout(r, 600));
+        else await new Promise((r) => setTimeout(r, 400));
       }
     }
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 150));
   }
 
   if (results.length === 0) {
@@ -99,12 +98,15 @@ export async function searchStores(opts: {
     return { candidates: [], note, provider: activeSearchProviderName(), missing: missingSearchKeys() };
   }
 
-  // Verificar cada dominio en vivo (parcialmente en paralelo; se incluyen
-  // los que cargan realmente y parecen ecommerce).
+  // Verificar en vivo como mucho los 12 primeros candidatos (los demás por
+  // relevancia). Verificar todos alargaría demasiado la respuesta.
+  const toCheck = results.slice(0, 12);
+
+  // Verificar cada dominio en vivo (en paralelo con límite de concurrencia).
   const candidates: StoreCandidate[] = [];
-  const CHUNK = 4;
-  for (let i = 0; i < results.length; i += CHUNK) {
-    const chunk = results.slice(i, i + CHUNK);
+  const CHUNK = 6;
+  for (let i = 0; i < toCheck.length; i += CHUNK) {
+    const chunk = toCheck.slice(i, i + CHUNK);
     const checks = await Promise.all(
       chunk.map(async (r): Promise<StoreCandidate | null> => {
         try {

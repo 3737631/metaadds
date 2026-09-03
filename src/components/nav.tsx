@@ -2,20 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Trophy, Heart, Settings, Flame, Store, Wand2 } from "lucide-react";
+import { Settings, Flame, Store } from "lucide-react";
 
 /**
- * Navegación de la app:
- * Inicio · Ganadores · Crear anuncio · Crear tienda · Guardados · Ajustes
+ * Navegación de la app simplificada:
+ * Tienda (crear tu tienda) · Ajustes (conectar tu tienda Shopify).
  * Barra inferior en móvil, barra lateral compacta en escritorio.
  */
 
 const NAV = [
-  { href: "/", label: "Inicio", icon: Home, exact: true },
-  { href: "/ganadores", label: "Ganadores", icon: Trophy },
-  { href: "/crear-anuncio", label: "Anuncio", icon: Wand2 },
-  { href: "/crear-tienda", label: "Tienda", icon: Store },
-  { href: "/guardados", label: "Guardados", icon: Heart },
+  { href: "/crear-tienda", label: "Crear tienda", icon: Store },
   { href: "/ajustes", label: "Ajustes", icon: Settings },
 ];
 
@@ -39,7 +35,7 @@ export default function Nav() {
         </Link>
         <nav className="flex-1 space-y-1 px-3 py-2">
           {NAV.map((item) => {
-            const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+            const active = pathname === item.href;
             const Icon = item.icon;
             return (
               <Link
@@ -71,7 +67,7 @@ export default function Nav() {
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {NAV.map((item) => {
-          const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+          const active = pathname === item.href;
           const Icon = item.icon;
           return (
             <Link
