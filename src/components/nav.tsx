@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Trophy, Heart, Settings, Flame } from "lucide-react";
+import { Home, Trophy, Heart, Settings, Flame, Store, Wand2 } from "lucide-react";
 
 /**
- * Navegación de la app — solo 4 entradas:
- * Inicio · Ganadores · Guardados · Ajustes
+ * Navegación de la app:
+ * Inicio · Ganadores · Crear anuncio · Crear tienda · Guardados · Ajustes
  * Barra inferior en móvil, barra lateral compacta en escritorio.
  */
 
 const NAV = [
   { href: "/", label: "Inicio", icon: Home, exact: true },
   { href: "/ganadores", label: "Ganadores", icon: Trophy },
+  { href: "/crear-anuncio", label: "Anuncio", icon: Wand2 },
+  { href: "/crear-tienda", label: "Tienda", icon: Store },
   { href: "/guardados", label: "Guardados", icon: Heart },
   { href: "/ajustes", label: "Ajustes", icon: Settings },
 ];
