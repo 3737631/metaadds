@@ -88,8 +88,12 @@ function buildThemeLiquid(): string {
 }
 
 function buildHeaderSection(theme: StoreTheme): string {
-  const menu = (theme.header?.menu ?? ["Inicio", "Productos", "Contacto"])
-    .map((m) => `<a href="#${m.toLowerCase().replace(/\W+/g, "-")}">${esc(m)}</a>`)
+  const raw = theme.header?.menu ?? [];
+  const items = raw
+    .map((m) => (typeof m === "string" ? { text: m, href: "#" } : m))
+    .filter((m) => m && typeof m.text === "string");
+  const menu = (items.length > 0 ? items : [{ text: "Inicio", href: "#" }, { text: "Productos", href: "#" }, { text: "Contacto", href: "#" }])
+    .map((m) => `<a href="${esc(m.href || "#")}">${esc(m.text)}</a>`)
     .join("");
   return `<header>
   <div class="container nav">
