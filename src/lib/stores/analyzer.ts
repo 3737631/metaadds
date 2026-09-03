@@ -62,6 +62,26 @@ export function calculateStoreSimilarity(opts: {
   };
 }
 
+/**
+ * Análisis mínimo y honesto, construido únicamente a partir del HTML accesible
+ * (sin inventar nada). Se devuelve cuando no hay IA disponible o ésta falla,
+ * para que el usuario nunca reciba un error engañoso de "no pudimos acceder".
+ */
+function partialAnalysis(url: string, domain: string, title: string, html: string): StoreAnalysis {
+  return {
+    url,
+    domain,
+    shopify: detectShopify(html),
+    title,
+    description: null,
+    brand: { logoUrl: null, colors: [], fontFamily: null, style: "—" },
+    home: { hero: null, benefits: [], socialProof: false, productCount: null, hasFaq: false, hasCta: false, sections: [] },
+    product: { title: null, price: null, currency: "EUR", offer: null, variantsCount: null, description: null, hasReviews: false, guarantee: null, cta: null },
+    conversion: { offerClarity: 0, socialProofScore: 0, trustScore: 0, ctaClarity: 0, structureScore: 0, urgency: false, valueProp: null, strengths: [], weaknesses: [] },
+    rawExcerpt: html.slice(0, 2000),
+  };
+}
+
 export async function analyzeStore(url: string): Promise<StoreAnalysis | null> {
   const fetched = await safeFetchHtml(url);
   if (!fetched || !fetched.ok || !fetched.html) return null;
@@ -72,18 +92,7 @@ export async function analyzeStore(url: string): Promise<StoreAnalysis | null> {
 
   const service = getAIService();
   if (!service.available) {
-    return {
-      url: fetched.finalUrl,
-      domain,
-      shopify: detectShopify(fetched.html),
-      title,
-      description: null,
-      brand: { logoUrl: null, colors: [], fontFamily: null, style: "—" },
-      home: { hero: null, benefits: [], socialProof: false, productCount: null, hasFaq: false, hasCta: false, sections: [] },
-      product: { title: null, price: null, currency: "EUR", offer: null, variantsCount: null, description: null, hasReviews: false, guarantee: null, cta: null },
-      conversion: { offerClarity: 0, socialProofScore: 0, trustScore: 0, ctaClarity: 0, structureScore: 0, urgency: false, valueProp: null, strengths: [], weaknesses: [] },
-      rawExcerpt: fetched.html.slice(0, 2000),
-    };
+    return partialAnalysis(fetched.finalUrl, domain, title, fetched.html);
   }
 
   try {
@@ -109,7 +118,7 @@ export async function analyzeStore(url: string): Promise<StoreAnalysis | null> {
       rawExcerpt: fetched.html.slice(0, 2000),
     };
   } catch (err) {
-    console.warn("[storeAnalyze] AI falló:", err);
-    return null;
+    console.warn("[storeAnalyze] AI falló, devolviendo análisis parcial honesto:", err);
+    return partialAnalysis(fetched.finalUrl, domain, title, fetched.html);
   }
 }
