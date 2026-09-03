@@ -45,3 +45,4 @@ next-env.d.ts
 # playwright + dev logs
 /.playwright-mcp/
 /dev.log
+.vercel
