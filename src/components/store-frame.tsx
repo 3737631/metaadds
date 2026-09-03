@@ -1,14 +1,140 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Store, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Store, Loader2, Pencil } from "lucide-react";
 
 /**
- * Vista en miniatura de la web REAL de la tienda, renderizada en un iframe
- * aislado (sandbox sin scripts ni forms). El HTML ya viene capturado con su
- * CSS incrustado, así que se ve EXACTAMENTE igual que la tienda original.
+ * Vista en miniatura de la web REAL de la tienda, renderizada en un iframe aislado.
+ * Por defecto se ve EXACTAMENTE igual que la tienda (HTML+CSS capturados).
+ *
+ * En modo edición (por defecto) se inyecta un pequeño "click-to-edit" dentro del
+ * iframe: al pulsar cualquier texto o imagen puedes cambiarlo en vivo. Los cambios
+ * se notifican al padre mediante postMessage (protocolo {type:'snapshot-edit'}).
+ *
+ * Seguridad: buildSnapshot quita scripts, atributos on* e iframes; el iframe va con
+ * sandbox="allow-scripts" (SIN allow-same-origin) para que el HTML capturado no pueda
+ * escapar ni tocar cookies. Solo corre nuestro script de edición.
  */
 const BASE_WIDTH = 1200; // ancho lógico sobre el que está maquetada la miniweb
+
+/** Script de click-to-edit que se inyecta dentro del iframe (corre aislado). */
+const EDITOR_SCRIPT = `
+(function () {
+  var BOOT = '__ED__';
+  function qa(s) { return Array.prototype.slice.call(document.querySelectorAll(s)); }
+
+  function isTextEl(el) {
+    if (!el) return false;
+    if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'NOSCRIPT' || el.tagName === 'SVG') return false;
+    if (el.closest('form')) return false;
+    var text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (text.length < 1) return false;
+    // Solo elementos que son "hojas" (poca descendencia directa de texto editable)
+    var tag = el.tagName.toLowerCase();
+    return ['h1','h2','h3','h4','h5','p','li','a','span','td','th','button','strong','em','b','figcaption','blockquote','small','label','div'].indexOf(tag) >= 0;
+  }
+
+  // 1) Marcar textos e imágenes editables
+  var EDITABLE_SEL = 'h1,h2,h3,h4,h5,p,li,a,span,td,th,button,strong,em,b,figcaption,blockquote,small,label,div';
+  var eid = 0;
+  function tag() {
+    qa(EDITABLE_SEL).forEach(function (el) {
+      if (el.getAttribute(BOOT)) return;
+      if (el.hasAttribute('data-eid')) return;
+      if (!isTextEl(el)) return;
+      el.setAttribute('data-eid', 't' + (++eid));
+      el.setAttribute(BOOT, '1');
+    });
+    // imágenes
+    qa('img, picture, [style*="background-image"]').forEach(function (el) {
+      if (el.getAttribute('data-eid')) return;
+      el.setAttribute('data-eid', 'i' + (++eid));
+    });
+  }
+
+  // 2) Inyectar estilos de edición
+  var st = document.createElement('style');
+  st.textContent = [
+    '[data-eid][data-edit="1"] { outline:1.5px dashed rgba(59,130,246,.75) !important; outline-offset:1px; cursor:text !important; transition: background .15s; }',
+    '[data-eid][data-edit="1"]:hover { background: rgba(59,130,246,.08); }',
+    '[data-eid][data-img="1"] { cursor:pointer; }',
+    '.ed-banner { position:fixed; top:0; left:0; right:0; z-index:99999; background:#2563eb; color:#fff; text-align:center; font:600 12px/20px system-ui,sans-serif; letter-spacing:.2px; }'
+  ].join('\n');
+  document.head.appendChild(st);
+
+  // Banner informativo
+  var banner = document.createElement('div');
+  banner.className = 'ed-banner';
+  banner.textContent = 'Clic para editar: toca cualquier texto o imagen de la web';
+  banner.style.pointerEvents = 'none';
+  document.body.appendChild(banner);
+
+  function activateText(el) {
+    var was = el.textContent;
+    el.setAttribute('contenteditable', 'true');
+    el.setAttribute('data-edit', '1');
+    el.focus();
+    // Seleccionar todo el texto
+    try {
+      var r = document.createRange();
+      r.selectNodeContents(el);
+      var s = window.getSelection();
+      s.removeAllRanges(); s.addRange(r);
+    } catch (e) {}
+    function done() {
+      el.removeAttribute('contenteditable');
+      var now = el.textContent || '';
+      if (now !== was) {
+        el.setAttribute('data-edit', '1');
+        parent.postMessage({ type: 'snapshot-edit', mode: 'text', eid: el.getAttribute('data-eid'), value: now }, '*');
+      } else {
+        el.setAttribute('data-edit', '1');
+      }
+      document.removeEventListener('click', outside, true);
+      el.removeEventListener('blur', done);
+      el.addEventListener('keydown', function (k) { if (k.key === 'Enter' && !k.shiftKey) { k.preventDefault(); el.blur(); } });
+      el.focus();
+    }
+    function outside(e) {
+      if (!el.contains(e.target)) { done(); }
+    }
+    setTimeout(function () { document.addEventListener('click', outside, true); }, 50);
+    el.addEventListener('blur', done);
+  }
+
+  function pickImage(el) {
+    var current = el.tagName === 'IMG' ? (el.getAttribute('src') || '') : '';
+    var url = window.prompt('Nueva URL de la imagen:', current);
+    if (!url) return;
+    function apply(src) {
+      if (el.tagName === 'IMG') { el.setAttribute('src', src); }
+      else { el.style.backgroundImage = 'url(' + src + ')'; }
+      parent.postMessage({ type: 'snapshot-edit', mode: 'img', eid: el.getAttribute('data-eid'), value: src }, '*');
+    }
+    if (/^https?:\\/\\//i.test(url)) apply(url);
+    else apply(url);
+  }
+
+  // Delegación de clics (captura). Los enlaces NO navegan si son editables; el
+  // propio preventDefault lo garantiza; los no-editables conservan su href.
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t && t === banner) return;
+    var el = t && t.closest ? t.closest('[data-eid]') : null;
+    if (!el) return;
+    if (el.tagName === 'IMG' || el.tagName === 'PICTURE' || /background-image/.test(el.getAttribute('style') || '')) {
+      e.preventDefault(); e.stopPropagation(); pickImage(el); return;
+    }
+    if (isTextEl(el)) {
+      e.preventDefault(); e.stopPropagation(); activateText(el);
+    }
+  }, true);
+
+  tag();
+  // Re-etiquetar contenido que aparezca tarde (muy pocos sites usan AJAX sin scripts, pero por si acaso)
+  var t = setInterval(function () { tag(); if (document.querySelector('[data-eid]')) clearInterval(t); }, 4000);
+})();
+`;
 
 export default function StoreFrame({
   html,
@@ -22,6 +148,7 @@ export default function StoreFrame({
   domain: string;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [width, setWidth] = useState<number>(380);
 
   useEffect(() => {
@@ -35,8 +162,34 @@ export default function StoreFrame({
     return () => ro.disconnect();
   }, []);
 
+  // Recibir notificaciones de edición desde dentro del iframe.
+  const onEdit = useCallback((eid: string, mode: string, value: string) => {
+    // Podríamos registrar aquí el histórico; de momento no hacemos nada en el padre
+    // porque el iframe ya muestra el cambio en vivo.
+  }, []);
+
+  useEffect(() => {
+    function handler(e: MessageEvent) {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const d = e.data;
+      if (d && d.type === "snapshot-edit") {
+        onEdit(String(d.eid), String(d.mode), String(d.value));
+      }
+    }
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [onEdit]);
+
+  const editableSrc = useMemo(() => {
+    // Inyectamos nuestro script de editor justo antes de </body>.
+    const marker = "</body>";
+    const idx = html.lastIndexOf(marker);
+    if (idx === -1) return html;
+    return html.slice(0, idx) + `<script>${EDITOR_SCRIPT}<\\/script>` + html.slice(idx);
+  }, [html]);
+
   const scale = width > 0 ? width / BASE_WIDTH : 1;
-  const viewportH = 520; // alto "visual" de la miniatura
+  const viewportH = 520;
 
   return (
     <div className="flex flex-col gap-2">
@@ -63,10 +216,11 @@ export default function StoreFrame({
             style={{ height: viewportH, width: "100%" }}
           >
             <iframe
+              ref={iframeRef}
               title={title || domain || "Vista de la tienda"}
-              sandbox=""
+sandbox="allow-scripts allow-modals"
               scrolling="yes"
-              srcDoc={html}
+              srcDoc={editableSrc}
               style={{
                 width: BASE_WIDTH,
                 height: Math.ceil(viewportH / scale),
@@ -80,7 +234,9 @@ export default function StoreFrame({
           </div>
         )}
       </div>
-      <p className="text-[11px] text-faint">Vista fiel de la web real (no editable). Puedes hacer scroll dentro.</p>
+      <p className="flex items-center gap-1.5 text-[11px] text-faint">
+        <Pencil className="h-3 w-3" /> Clic sobre cualquier texto o imagen para editarla (web exacta en vivo).
+      </p>
     </div>
   );
 }
