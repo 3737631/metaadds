@@ -23,10 +23,7 @@ export class GeminiProvider implements AIProvider {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
 
     const parts = [{ text: input.userPrompt }];
-    const contents = [
-      { role: "user", parts },
-      { role: "model", parts: [{ text: "Entendido." }] },
-    ];
+    const contents = [{ role: "user", parts }];
 
     const generationConfig: Record<string, unknown> = {
       temperature: input.temperature ?? 0.7,
