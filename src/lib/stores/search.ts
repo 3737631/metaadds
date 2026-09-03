@@ -22,14 +22,11 @@ function looksLikeArticle(snippet: string, title: string): boolean {
 }
 
 function buildQueries(productName: string, category: string, country: string): string[] {
-  const base = productName || `tienda online ${category}`;
+  const terms = productName || category;
   const market = country && country !== "es" ? ` ${country}` : "";
+  const suff = [" tienda online", " comprar", " shop", " site", " myshopify"];
   const queries = new Set<string>();
-  queries.add(`${base} tienda online${market}`);
-  queries.add(`${base} comprar${market}`);
-  queries.add(`${base} shop${market}`);
-  queries.add(`${base} site`);
-  queries.add(`${base} myshopify`);
+  for (const s of suff) queries.add(`${terms}${s}${market}`);
   return Array.from(queries).slice(0, 5);
 }
 
@@ -66,32 +63,40 @@ export async function searchStores(opts: {
   const results: SearchResult[] = [];
 
   // Ejecutar búsquedas reales de forma secuencial, tolerando errores aislados.
+  // DuckDuckGo tiende a limitar (202) si recibe varias peticiones seguidas,
+  // así que espaciamos las consultas y reintentamos una vez con backoff.
   let searchErrors = 0;
   for (const q of queries) {
-    try {
-      const res = await provider.search(q);
-      for (const r of res) {
-        if (isBlockedDomain(r.url)) continue;
-        if (looksLikeArticle(r.snippet, r.title)) continue;
-        const dom = r.domain;
-        if (seen.has(dom)) continue;
-        seen.add(dom);
-        results.push(r);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1200));
+        const res = await provider.search(q);
+        for (const r of res) {
+          if (isBlockedDomain(r.url)) continue;
+          if (looksLikeArticle(r.snippet, r.title)) continue;
+          const dom = r.domain;
+          if (seen.has(dom)) continue;
+          seen.add(dom);
+          results.push(r);
+        }
+        break; // éxito: no reintentar
+      } catch {
+        if (attempt === 1) searchErrors++;
+        else await new Promise((r) => setTimeout(r, 600));
       }
-    } catch {
-      searchErrors++;
     }
+    await new Promise((r) => setTimeout(r, 400));
   }
 
   if (results.length === 0) {
-    const missing = missingSearchKeys();
+    const isSerper = activeSearchProviderName() === "serper";
     const note =
-      missing.length > 0
-        ? `Falta configurar la búsqueda real: ${missing.join(", ")}`
-        : searchErrors === queries.length
-          ? "No pudimos conectar con el buscador web en este momento."
-          : "No hemos encontrado tiendas verificables para esta búsqueda.";
-    return { candidates: [], note, provider: activeSearchProviderName(), missing };
+      searchErrors === queries.length
+        ? isSerper
+          ? "No pudimos conectar con el buscador de Google (Serper) en este momento."
+          : "El buscador gratuito (DuckDuckGo) no respondió ahora (suele limitar peticiones desde servidor). Configura SEARCH_API_KEY para una búsqueda fiable de Google."
+        : "No hemos encontrado tiendas verificables para esta búsqueda.";
+    return { candidates: [], note, provider: activeSearchProviderName(), missing: missingSearchKeys() };
   }
 
   // Verificar cada dominio en vivo (parcialmente en paralelo; se incluyen

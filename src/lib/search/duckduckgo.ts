@@ -17,8 +17,10 @@ export class DuckDuckGoProvider implements SearchProvider {
       },
       signal: AbortSignal.timeout(25000),
     });
-    if (!res.ok) {
-      throw new Error(`DuckDuckGo error ${res.status}`);
+    if (res.status !== 200) {
+      // DuckDuckGo responde 202 cuando limita por ritmo/anti-bot desde un
+      // servidor. Lo tratamos como error para que el llamador lo cuente.
+      throw new Error(`DuckDuckGo no disponible (${res.status})`);
     }
     const html = await res.text();
     const out: SearchResult[] = [];
