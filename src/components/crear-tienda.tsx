@@ -13,6 +13,7 @@ import {
   Download,
   Check,
   ChevronDown,
+  Pencil,
 } from "lucide-react";
 
 type Category = { id: string; label: string };
@@ -48,6 +49,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [notif, setNotif] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   function flash(msg: string) {
     setNotif(msg);
@@ -83,6 +85,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setOpening(true);
     setError(null);
     setUploaded(null);
+    setEditing(false);
     try {
       // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
       const [snapRes, reproRes] = await Promise.all([
@@ -320,11 +323,33 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             <span className="text-xs text-faint">Vista fiel de la web real</span>
           </div>
 
+          {/* Botón grande de edición */}
+          {!editing ? (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-base font-bold text-white shadow-lg shadow-accent/25 transition-transform active:scale-[0.98] hover:brightness-110"
+            >
+              <Pencil className="h-6 w-6" /> EDITAR
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/50 bg-emerald-500/10 px-6 py-4 text-base font-bold text-emerald-400 hover:brightness-110"
+              >
+                <Check className="h-6 w-6" /> LISTO
+              </button>
+            </div>
+          )}
+
           <StoreFrame
             html={snapshot.html}
             title={snapshot.title}
             shopify={snapshot.shopify}
             domain={snapshot.domain}
+            editMode={editing}
           />
 
           <div className="flex flex-col gap-2">

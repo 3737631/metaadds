@@ -141,11 +141,13 @@ export default function StoreFrame({
   title,
   shopify,
   domain,
+  editMode = false,
 }: {
   html: string;
   title: string;
   shopify: boolean;
   domain: string;
+  editMode?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -181,7 +183,9 @@ export default function StoreFrame({
   }, [onEdit]);
 
   const editableSrc = useMemo(() => {
-    // Inyectamos nuestro script de editor justo antes de </body>.
+    // Sin modo edición: mostramos la web real tal cual (con sus scripts y animaciones).
+    if (!editMode) return html;
+    // En modo edición inyectamos nuestro script de editor justo antes de </body>.
     const marker = "</body>";
     const idx = html.lastIndexOf(marker);
     if (idx === -1) return html;
@@ -189,7 +193,7 @@ export default function StoreFrame({
     // que cierre la etiqueta en el HTML del srcdoc; un `<\/script>` escapado dejaría el <script>
     // abierto y el parser se tragaría el resto del HTML (no ejecutaría nuestro editor).
     return html.slice(0, idx) + "<script>" + EDITOR_SCRIPT + "</script>" + html.slice(idx);
-  }, [html]);
+  }, [html, editMode]);
 
   const scale = width > 0 ? width / BASE_WIDTH : 1;
   const viewportH = 520;
@@ -238,7 +242,10 @@ sandbox="allow-scripts allow-modals"
         )}
       </div>
       <p className="flex items-center gap-1.5 text-[11px] text-faint">
-        <Pencil className="h-3 w-3" /> Clic sobre cualquier texto o imagen para editarla (web exacta en vivo).
+        <Pencil className="h-3 w-3" />{" "}
+        {editMode
+          ? "Modo edición: clic sobre cualquier texto o imagen para cambiarlo en vivo."
+          : "Web exacta de la tienda real. Pulsa EDITAR para modificar sus textos e imágenes."}
       </p>
     </div>
   );

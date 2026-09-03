@@ -17,9 +17,7 @@ export interface StoreSnapshot {
 }
 
 const HEAD_RE = /(<head[^>]*>)/i;
-const SCRIPT_TAG = /<script\b[^>]*>[\s\S]*?<\/script\s*>/gi;
 const LINK_INLINE_RE = /<link\b(?=[^>]*rel=["']stylesheet["'])[^>]*?href=["']([^"']+)["'][^>]*\/?\s*>/gi;
-const EVENT_ATTRS = /\son(?:click|load|error|change|submit|mouseover|mouseenter|mouseleave|focus|blur|input|keydown|keyup|scroll|resize|touchstart|touchend|touchmove|dblclick|contextmenu|select)\s*=\s*("[^"]*"|'[^']*'|\S+)/gi;
 const IFRAME_TAG = /<iframe\b[^>]*>[\s\S]*?<\/iframe\s*>|<iframe\b[^>]*\/>/gi;
 const FORM_TAG = /<\/?form\b[^>]*>/gi;
 const BASE_TAG = /<base\b[^>]*\/?\s*>/gi;
@@ -59,12 +57,15 @@ export async function buildSnapshot(rawUrl: string): Promise<StoreSnapshot | nul
   html = html.replace(BASE_TAG, "");
   const baseHref = url.endsWith("/") ? url : url;
   html = html.replace(HEAD_RE, (m, head) => `${head}<base href="${baseHref}">`);
-  // 2) Quitar scripts (el iframe va con sandbox, por refuerzo aquí también).
-  html = html.replace(SCRIPT_TAG, "");
-  html = html.replace(EVENT_ATTRS, "");
+  // 2) CONSERVAMOS los scripts y los manejadores on* de la web real (sin reconstrucción):
+  //    son los que cargan las imágenes perezosas, ejecutan las animaciones y eligen
+  //    menús/estados exactos de la tienda.
+  //    La seguridad la garantiza el iframe con sandbox="allow-scripts" SIN allow-same-origin:
+  //    el código de la tienda corre aislado (origen opaco), no puede tocar cookies ni el
+  //    DOM del padre ni escapar. Solo quitamos los elementos de navegación/embebido.
   html = html.replace(IFRAME_TAG, "");
   html = html.replace(META_REFRESH, "");
-  // 3) Formularios → divs (nada de envíos).
+  // 3) Formularios → nada de envíos.
   html = html.replace(FORM_TAG, "");
 
   // 4) Incrustar en línea las hojas de estilo reales (máx. un número razonable).
