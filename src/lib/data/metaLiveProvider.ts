@@ -78,6 +78,7 @@ export class MetaLiveProvider implements DataProvider {
     const token = this.token;
     if (!token) return [];
 
+    const t0 = Date.now();
     // ads_archive acepta parámetros por GET; POST devuelve un 400
     // "Unsupported post request". El término `search_terms` es obligatorio.
     const results = await Promise.all(
@@ -87,14 +88,19 @@ export class MetaLiveProvider implements DataProvider {
     // Deduplicar por id conservando el orden y limitar a 25 resultados reales.
     const seen = new Set<string>();
     const ads: RawAd[] = [];
+    let attempted = 0;
     for (const batch of results) {
+      attempted += batch.length;
       for (const ad of batch) {
         if (seen.has(ad.id)) continue;
         seen.add(ad.id);
         ads.push(ad);
-        if (ads.length >= 25) return ads;
+        if (ads.length >= 25) break;
       }
     }
+    console.warn(
+      `[meta-live] términos=${this.defaultSearchTerms.length} resultados_crudos=${attempted} ads_unicos=${ads.length} ms=${Date.now() - t0}`
+    );
     return ads;
   }
 
@@ -133,12 +139,17 @@ export class MetaLiveProvider implements DataProvider {
 
       if (res.ok) {
         const json = (await res.json()) as ArchiveResponse;
-        if (json.error?.message) break;
+        if (json.error?.message) {
+          console.warn(`[meta-live] término "${searchTerm}" OK pero error app: ${json.error.message.slice(0, 120)}`);
+          break;
+        }
+        console.warn(`[meta-live] término "${searchTerm}" OK: ${json.data.length} ads (intento ${attempt})`);
         return json.data.map((a) => this.toRawAd(a));
       }
 
       const retryable =
         res.status === 500 || res.status === 429 || res.status === 502 || res.status === 503;
+      console.warn(`[meta-live] término "${searchTerm}" status=${res.status} (intento ${attempt}, retryable=${retryable})`);
       if (!retryable || attempt === maxAttempts) {
         break;
       }
