@@ -80,6 +80,53 @@ const MAX_REDIRECTS = 4;
 const TIMEOUT_MS = 15000;
 const MAX_BYTES = 2_500_000; // ~2.5 MB de HTML
 
+const ASSET_TIMEOUT_MS = 10000;
+const ASSET_MAX_BYTES = 1_500_000; // 1.5 MB por recurso CSS
+
+/**
+ * Fetch seguro para recursos (CSS/JS/HTML genérico) con límites y SSRF.
+ * Devuelve el buffer o null. NO valida tipo de contenido (el llamador decide).
+ */
+export async function safeFetchBytes(rawUrl: string): Promise<Buffer | null> {
+  const start = await resolveSafeUrl(rawUrl);
+  if (!start) return null;
+
+  let current = start;
+  let redirects = 0;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ASSET_TIMEOUT_MS);
+
+  try {
+    while (true) {
+      const res = await fetch(current.toString(), {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "user-agent": "Mozilla/5.0 (compatible; MetaWinnersBot/1.0)" },
+      });
+
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc || redirects >= MAX_REDIRECTS) return null;
+        const next = await resolveSafeUrl(new URL(loc, current).toString());
+        if (!next) return null;
+        current = next;
+        redirects++;
+        continue;
+      }
+
+      if (res.status !== 200) return null;
+
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > ASSET_MAX_BYTES) return null;
+      return buf;
+    }
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function safeFetchHtml(rawUrl: string): Promise<SafeFetchResult | null> {
   const start = await resolveSafeUrl(rawUrl);
   if (!start) return null;

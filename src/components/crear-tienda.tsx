@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { loadShopifyCreds } from "./shopify-connect";
-import ReplicaEditor from "./replica-editor";
+import StoreFrame from "./store-frame";
 import { replicaToTheme } from "@/lib/stores/replica";
 import {
   Search,
@@ -41,6 +41,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [searchNote, setSearchNote] = useState("");
   const [selected, setSelected] = useState<StoreCandidate | null>(null);
   const [opening, setOpening] = useState(false);
+  const [snapshot, setSnapshot] = useState<import("@/lib/stores/snapshot").StoreSnapshot | null>(null);
   const [replica, setReplica] = useState<import("@/lib/stores/replica").StoreReplica | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,14 +84,26 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setError(null);
     setUploaded(null);
     try {
-      const res = await fetch("/api/stores/replica", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: c.url }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error?.message || "No se pudo abrir la tienda");
-      setReplica(json.data.replica);
+      // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
+      const [snapRes, reproRes] = await Promise.all([
+        fetch("/api/stores/snapshot", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: c.url }),
+        }),
+        fetch("/api/stores/replica", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: c.url }),
+        }),
+      ]);
+      const [snapJson, reproJson] = await Promise.all([
+        snapRes.json(),
+        reproRes.json(),
+      ]);
+      if (!snapRes.ok) throw new Error(snapJson.error?.message || "No se pudo capturar la web");
+      setSnapshot(snapJson.data);
+      if (reproRes.ok && reproJson.data?.replica) setReplica(reproJson.data.replica);
       setStep("editor");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al abrir la tienda");
@@ -293,8 +306,8 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
         </>
       ) : null}
 
-      {/* PASO 2: editor fiel click-to-edit */}
-      {step === "editor" && replica ? (
+      {/* PASO 2: mini web fiel de la tienda real */}
+      {step === "editor" && snapshot ? (
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <button
@@ -304,18 +317,21 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             >
               <ArrowLeft className="h-4 w-4" /> Volver a tiendas
             </button>
-            <span className="text-xs text-faint">
-              Haz clic en cualquier texto, color o imagen para editarlo
-            </span>
+            <span className="text-xs text-faint">Vista fiel de la web real</span>
           </div>
 
-          <ReplicaEditor replica={replica} onChange={setReplica} />
+          <StoreFrame
+            html={snapshot.html}
+            title={snapshot.title}
+            shopify={snapshot.shopify}
+            domain={snapshot.domain}
+          />
 
           <div className="flex flex-col gap-2">
             <button
               type="button"
               onClick={doDownload}
-              disabled={downloading}
+              disabled={downloading || !replica}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
             >
               {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -325,10 +341,10 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             <button
               type="button"
               onClick={doUpload}
-              disabled={uploading}
+              disabled={uploading || !replica}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
             >
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               {uploading ? "Subiendo a tu tienda..." : "SUBIR A MI TIENDA SHOPIFY"}
             </button>
             {uploaded && (
