@@ -478,72 +478,166 @@ function toChatOp(o: unknown): ChatOp | null {
   }
 }
 
+/** ¿Parece un objeto de operación (y no el envoltorio {reply, ops})? */
+function looksLikeOp(o: Record<string, unknown>): boolean {
+  return !!(
+    o.op || o.action || o.tipo || o.accion || o.selector || o.replaceByText ||
+    o.css || o.css_code || o.cssCode || o.css_text || o.rule ||
+    o.text || o.html || o.src || o.style || o.styles || o.attr ||
+    o.newText ||
+    o.hide === true || o.hidden === true || o.remove === true ||
+    o.display !== undefined
+  );
+}
+
 /**
- * Extrae las operaciones completas que ya se pueden leer del array "ops" del
- * JSON que está llegando por streaming. Devuelve objetos en bruto en orden.
+ * Extrae las operaciones completas que ya se pueden leer del array "ops" (o
+ * "changes") del JSON que está llegando por streaming, y también los dialectos
+ * directos: array de ops a nivel superior o un solo op a nivel superior.
+ * Devuelve objetos en bruto en orden.
  */
 function extractCompleteOps(buf: string): unknown[] {
-  // Localiza la clave "ops" y el "[" que abre el array.
-  const opsKey = buf.indexOf('"ops"');
-  if (opsKey < 0) return [];
-  const arrStart = buf.indexOf("[", opsKey);
-  if (arrStart < 0) return [];
-
   const out: unknown[] = [];
-  let i = arrStart + 1;
-  let inStr = false;
-  while (i < buf.length) {
-    const ch = buf[i];
-    if (inStr) {
-      if (ch === "\\") {
-        i += 2;
+
+  // Elementos balanceados de llaves dentro de un array.
+  const scanBraceElements = (arrStart: number, arrEnd: number) => {
+    let i = arrStart + 1;
+    while (i <= arrEnd && i < buf.length) {
+      if (buf[i] !== "{") {
+        i += 1;
         continue;
       }
-      if (ch === '"') inStr = false;
-      i += 1;
-      continue;
+      let depth = 0;
+      let j = i;
+      let eStr = false;
+      let complete = false;
+      while (j <= arrEnd && j < buf.length) {
+        const c = buf[j];
+        if (eStr) {
+          if (c === "\\") {
+            j += 2;
+            continue;
+          }
+          if (c === '"') eStr = false;
+          j += 1;
+          continue;
+        }
+        if (c === '"') eStr = true;
+        else if (c === "{") depth += 1;
+        else if (c === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            complete = true;
+            break;
+          }
+        }
+        j += 1;
+      }
+      if (!complete) return;
+      const raw = buf.slice(i, j + 1);
+      const parsed = tryParseRaw(raw);
+      if (parsed && typeof parsed === "object") {
+        out.push(parsed);
+      } else {
+        return; // op incompleta/inválida: el resto llegará con más texto
+      }
+      i = j + 1;
     }
-    if (ch === '"') {
-      inStr = true;
-      i += 1;
-      continue;
-    }
-    if (ch !== "{") {
-      i += 1;
-      continue;
-    }
-    // Inicio de un elemento: balanceamos llaves.
+  };
+
+  // 1) Envoltorio {reply, ops:[...]} / {reply, changes:[...]}.
+  for (const key of ['"ops"', '"changes"']) {
+    const keyIdx = buf.indexOf(key);
+    if (keyIdx < 0) continue;
+    const arrStart = buf.indexOf("[", keyIdx);
+    if (arrStart < 0) continue;
+    // Hallamos el cierre del array para no pasarnos del envoltorio.
     let depth = 0;
-    let j = i;
     let eStr = false;
-    while (j < buf.length) {
-      const c = buf[j];
+    let arrEnd = arrStart;
+    while (arrEnd < buf.length) {
+      const c = buf[arrEnd];
       if (eStr) {
         if (c === "\\") {
-          j += 2;
+          arrEnd += 2;
           continue;
         }
         if (c === '"') eStr = false;
-        j += 1;
+        arrEnd += 1;
         continue;
       }
       if (c === '"') eStr = true;
-      else if (c === "{") depth += 1;
-      else if (c === "}") {
+      else if (c === "[") depth += 1;
+      else if (c === "]") {
         depth -= 1;
         if (depth === 0) break;
       }
-      j += 1;
+      arrEnd += 1;
     }
-    const raw = buf.slice(i, j + 1);
-    const parsed = tryParseRaw(raw);
-    if (parsed && typeof parsed === "object") {
-      out.push(parsed);
-    } else {
-      return out; // op incompleta/inválida: paramos (el resto llegará con más texto)
-    }
-    i = j + 1;
+    const before = out.length;
+    scanBraceElements(arrStart, arrEnd);
+    if (out.length > before) return out;
   }
+
+  // 2) Dialectos directos: array de ops a nivel superior o un solo op a nivel
+  // superior. Escaneamos todos los objetos balanceados y nos quedamos con los
+  // que parezcan operaciones (evitando así el envoltorio que no trae "ops").
+  if (buf.indexOf("{") >= 0 || buf.trimStart().startsWith("[")) {
+    let i = 0;
+    let inStr = false;
+    while (i < buf.length) {
+      const ch = buf[i];
+      if (inStr) {
+        if (ch === "\\") i += 2;
+        else if (ch === '"') inStr = false;
+        i += 1;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = true;
+        i += 1;
+        continue;
+      }
+      if (ch !== "{") {
+        i += 1;
+        continue;
+      }
+      let depth = 0;
+      let j = i;
+      let eStr = false;
+      let complete = false;
+      while (j < buf.length) {
+        const c = buf[j];
+        if (eStr) {
+          if (c === "\\") {
+            j += 2;
+            continue;
+          }
+          if (c === '"') eStr = false;
+          j += 1;
+          continue;
+        }
+        if (c === '"') eStr = true;
+        else if (c === "{") depth += 1;
+        else if (c === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            complete = true;
+            break;
+          }
+        }
+        j += 1;
+      }
+      if (!complete) break;
+      const raw = buf.slice(i, j + 1);
+      const parsed = tryParseRaw(raw);
+      if (parsed && typeof parsed === "object" && looksLikeOp(parsed as Record<string, unknown>)) {
+        out.push(parsed);
+      }
+      i = j + 1;
+    }
+  }
+
   return out;
 }
 
@@ -625,8 +719,8 @@ export async function chatEditStoreStream(
       }
     }
 
-    if (isLanguageChange(opts.request)) {
-      console.error("[chatStream][DEBUG] lang-change raw buf:", buf.slice(0, 6000));
+    if (isLanguageChange(opts.request) && extractCompleteOps(buf).length === 0) {
+      console.error("[chatStream] respuesta sin ops parseables. buf:", buf.slice(0, 1200));
     }
 
     return { provider: result.provider, model: result.model };
