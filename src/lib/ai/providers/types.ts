@@ -18,4 +18,6 @@ export interface AIProvider {
   readonly id: string;
   readonly name: string;
   generate(input: AIProviderInput): Promise<AIProviderResult>;
+  /** Streaming opcional: entrega el texto por fragmentos a medida que se genera. */
+  stream?(input: AIProviderInput, onDelta: (chunk: string) => void): Promise<AIProviderResult>;
 }

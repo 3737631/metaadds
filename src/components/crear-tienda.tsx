@@ -57,6 +57,8 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const chatOpsRef = useRef<((ops: ChatOp[]) => void) | null>(null);
+  const [streamingReply, setStreamingReply] = useState<string | null>(null);
+  const typewriterRef = useRef<number | null>(null);
 
   function flash(msg: string) {
     setNotif(msg);
@@ -95,6 +97,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setEditing(false);
     setChatMsgs([]);
     setChatInput("");
+    setStreamingReply(null);
     try {
       // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
       const [snapRes, reproRes] = await Promise.all([
@@ -124,6 +127,31 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     }
   }
 
+  // Muestra la respuesta de la IA "palabra a palabra" (efecto tecleo).
+  function showStreamingReply(full: string) {
+    if (typewriterRef.current) window.clearInterval(typewriterRef.current);
+    setStreamingReply("");
+    const words = full.split(" ");
+    let idx = 0;
+    typewriterRef.current = window.setInterval(() => {
+      idx += 1;
+      setStreamingReply(words.slice(0, idx).join(" "));
+      if (idx >= words.length && typewriterRef.current) {
+        window.clearInterval(typewriterRef.current);
+        typewriterRef.current = null;
+      }
+    }, 45);
+  }
+
+  function commitReply(full: string, fallback: string) {
+    if (typewriterRef.current) {
+      window.clearInterval(typewriterRef.current);
+      typewriterRef.current = null;
+    }
+    setStreamingReply(null);
+    setChatMsgs((prev) => [...prev, { role: "ai", text: full || fallback }]);
+  }
+
   async function doChat(text: string) {
     const req = text.trim();
     if (!req || !selected || chatLoading) return;
@@ -131,19 +159,103 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setChatInput("");
     setChatLoading(true);
     setError(null);
+
+    let reply = "";
     try {
       const res = await fetch("/api/stores/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: selected.url, request: req }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error?.message || "No pude aplicar el cambio");
-      const ops: ChatOp[] = json.data?.ops || [];
-      if (ops.length && chatOpsRef.current) chatOpsRef.current(ops);
-      const reply: string = json.data?.reply || "He aplicado tus cambios.";
-      setChatMsgs((prev) => [...prev, { role: "ai", text: reply }]);
+
+      if (!res.ok || !res.body) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error?.message || "No pude aplicar el cambio");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuf = "";
+      let errorMsg: string | null = null;
+      let gotDone = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sseBuf += decoder.decode(value, { stream: true });
+
+        let sep: number;
+        while ((sep = sseBuf.indexOf("\n\n")) >= 0) {
+          const event = sseBuf.slice(0, sep).trim();
+          sseBuf = sseBuf.slice(sep + 2);
+          if (!event.startsWith("data:")) continue;
+          const payload = event.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          let data: any;
+          try {
+            data = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          if (data.type === "ops" && Array.isArray(data.ops)) {
+            for (const op of data.ops) {
+              if (chatOpsRef.current) chatOpsRef.current([op]);
+            }
+          } else if (data.type === "reply" && typeof data.text === "string") {
+            reply = data.text;
+            showStreamingReply(data.text);
+          } else if (data.type === "done") {
+            gotDone = true;
+          } else if (data.type === "error" && typeof data.message === "string") {
+            errorMsg = data.message;
+          }
+        }
+      }
+      // Limpieza final del buffer SSE sobrante.
+      if (sseBuf.trim().startsWith("data:")) {
+        const payload = sseBuf.slice(5).trim();
+        if (payload && payload !== "[DONE]") {
+          try {
+            const data = JSON.parse(payload);
+            if (data.type === "reply" && typeof data.text === "string" && !reply) {
+              reply = data.text;
+              showStreamingReply(data.text);
+            } else if (data.type === "error" && typeof data.message === "string") {
+              errorMsg = data.message;
+            }
+          } catch {
+            /* noop */
+          }
+        }
+      }
+
+      if (!gotDone && !errorMsg) {
+        // Servidor cerró sin evento done: tratamos como éxito silencioso.
+        gotDone = true;
+      }
+
+      if (errorMsg) {
+        throw new Error(errorMsg);
+      }
+
+      // Espera a que termine el tecleo antes de fijar el mensaje final.
+      await new Promise<void>((resolve) => {
+        const wait = () => {
+          if (!typewriterRef.current) {
+            resolve();
+          } else {
+            setTimeout(wait, 60);
+          }
+        };
+        wait();
+      });
+      commitReply(reply, "He aplicado tus cambios.");
     } catch (e) {
+      if (typewriterRef.current) {
+        window.clearInterval(typewriterRef.current);
+        typewriterRef.current = null;
+      }
+      setStreamingReply(null);
       setError(e instanceof Error ? e.message : "Error al aplicar el cambio");
       setChatMsgs((prev) => [...prev, { role: "sys", text: "No pude aplicar tu petición. Inténtalo de nuevo." }]);
     } finally {
@@ -415,7 +527,13 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
                   {m.text}
                 </div>
               ))}
-              {chatLoading && (
+              {streamingReply !== null && (
+                <div className="self-start max-w-[85%] rounded-xl bg-surface-2 px-3 py-2 text-sm text-dim">
+                  {streamingReply}
+                  <span className="ml-0.5 inline-block animate-pulse">▌</span>
+                </div>
+              )}
+              {chatLoading && streamingReply === null && (
                 <div className="self-start flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-dim">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Aplicando cambios…
                 </div>

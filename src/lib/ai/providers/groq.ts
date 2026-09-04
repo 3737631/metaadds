@@ -78,4 +78,75 @@ export class GroqProvider implements AIProvider {
         : undefined,
     };
   }
+
+  async stream(
+    input: AIProviderInput,
+    onDelta: (chunk: string) => void
+  ): Promise<AIProviderResult> {
+    const model = input.model ?? "openai/gpt-oss-20b";
+    const maxTokens = Math.max(input.maxTokens ?? 1600, 3200);
+    const body: Record<string, unknown> = {
+      model,
+      messages: [
+        { role: "system", content: input.systemPrompt },
+        { role: "user", content: input.userPrompt },
+      ],
+      temperature: input.temperature ?? 0.7,
+      max_tokens: maxTokens,
+      stream: true,
+    };
+    if (input.responseFormat === "json") {
+      body.response_format = { type: "json_object" };
+    }
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      throw new Error(`Groq stream ${res.status}: ${err.slice(0, 200)}`);
+    }
+    if (!res.body) throw new Error("Groq stream: sin cuerpo");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let out = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(payload);
+          const delta = chunk?.choices?.[0]?.delta;
+          const text = delta?.content ?? delta?.reasoning_content ?? "";
+          if (typeof text === "string" && text) {
+            out += text;
+            onDelta(text);
+          }
+        } catch {
+          /* fragmento parcial: se ignora */
+        }
+      }
+    }
+
+    return {
+      content: out,
+      model,
+      provider: this.id,
+    };
+  }
 }

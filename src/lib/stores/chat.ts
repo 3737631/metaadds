@@ -216,6 +216,20 @@ export async function chatEditStore(opts: {
   // Aplana cada op entrante: un objeto con "style" anidado (ej.
   // {prop:"color", value:"navy"} o {color:"navy", ...}) produce varias
   // operaciones setStyle.
+  const ops = chatOpsFromArray(opsArr);
+  if (ops.length === 0) {
+    console.error("[/chat] sin ops aplicables. Respuesta IA:", result.content.slice(0, 3000));
+  }
+  return {
+    reply: reply || "He aplicado tus cambios.",
+    ops,
+    provider: result.provider,
+    model: result.model,
+  };
+}
+
+/** Convierte una lista de operaciones en bruto al formato ChatOp canónico. */
+function chatOpsFromArray(opsArr: unknown[]): ChatOp[] {
   const flat: ChatOp[] = [];
   const pushOp = (op: ChatOp | null) => {
     if (op) flat.push(op);
@@ -250,17 +264,7 @@ export async function chatEditStore(opts: {
     }
     pushOp(toChatOp(o));
   }
-
-  const ops = flat.filter((o): o is ChatOp => o !== null);
-  if (ops.length === 0) {
-    console.error("[/chat] sin ops aplicables. Respuesta IA:", result.content.slice(0, 3000));
-  }
-  return {
-    reply: reply || "He aplicado tus cambios.",
-    ops,
-    provider: result.provider,
-    model: result.model,
-  };
+  return flat.filter((o): o is ChatOp => o !== null);
 }
 
 /** Normaliza un nombre de operación que la IA pueda escribir de varias formas. */
@@ -411,5 +415,160 @@ function toChatOp(o: unknown): ChatOp | null {
       return { op: "remove", selector };
     default:
       return null;
+  }
+}
+
+/**
+ * Extrae las operaciones completas que ya se pueden leer del array "ops" del
+ * JSON que está llegando por streaming. Devuelve objetos en bruto en orden.
+ */
+function extractCompleteOps(buf: string): unknown[] {
+  // Localiza la clave "ops" y el "[" que abre el array.
+  const opsKey = buf.indexOf('"ops"');
+  if (opsKey < 0) return [];
+  const arrStart = buf.indexOf("[", opsKey);
+  if (arrStart < 0) return [];
+
+  const out: unknown[] = [];
+  let i = arrStart + 1;
+  let inStr = false;
+  while (i < buf.length) {
+    const ch = buf[i];
+    if (inStr) {
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inStr = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      i += 1;
+      continue;
+    }
+    if (ch !== "{") {
+      i += 1;
+      continue;
+    }
+    // Inicio de un elemento: balanceamos llaves.
+    let depth = 0;
+    let j = i;
+    let eStr = false;
+    while (j < buf.length) {
+      const c = buf[j];
+      if (eStr) {
+        if (c === "\\") {
+          j += 2;
+          continue;
+        }
+        if (c === '"') eStr = false;
+        j += 1;
+        continue;
+      }
+      if (c === '"') eStr = true;
+      else if (c === "{") depth += 1;
+      else if (c === "}") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+      j += 1;
+    }
+    const raw = buf.slice(i, j + 1);
+    const parsed = tryParseRaw(raw);
+    if (parsed && typeof parsed === "object") {
+      out.push(parsed);
+    } else {
+      return out; // op incompleta/inválida: paramos (el resto llegará con más texto)
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+function tryParseRaw(s: string): unknown | null {
+  try {
+    return JSON.parse(cleanJsonLLM(s));
+  } catch {
+    return null;
+  }
+}
+
+export interface ChatStreamHandlers {
+  /** Se llama por cada operación nueva a medida que el modelo la genera. */
+  onOp: (op: ChatOp) => void;
+  /** Se llama una vez que se conoce la respuesta textual ("reply"). */
+  onReply: (reply: string) => void;
+}
+
+/**
+ * Versión en streaming de chatEditStore: conforme el modelo va generando el
+ * JSON, va entregando cada operación en cuanto se completa, para poder
+ * aplicarla en vivo sin esperar a toda la respuesta.
+ */
+export async function chatEditStoreStream(
+  opts: { html: string; domain: string; request: string },
+  handlers: ChatStreamHandlers
+): Promise<{ provider?: string; model?: string } | null> {
+  const service = getAIService();
+  if (!service.available) return null;
+
+  let buf = "";
+  let emitted = 0;
+  let replySent = false;
+
+  try {
+    const result = await service.stream({
+      systemPrompt: buildSystemPrompt(),
+      userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
+      responseFormat: "json",
+      temperature: 0.4,
+      maxTokens: 2048,
+    }, (delta) => {
+      buf += delta;
+
+      // reply: se envía cuando la cadena del campo "reply" queda cerrada.
+      if (!replySent) {
+        const m = buf.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (m && m[1] !== undefined) {
+          replySent = true;
+          const reply = m[1].replace(/\\n/g, " ").trim();
+          if (reply) handlers.onReply(reply);
+        }
+      }
+
+      // ops: enviamos solo las operaciones completas nuevas.
+      const complete = extractCompleteOps(buf);
+      if (complete.length > emitted) {
+        for (const raw of complete.slice(emitted)) {
+          for (const op of chatOpsFromArray([raw])) handlers.onOp(op);
+        }
+        emitted = complete.length;
+      }
+    });
+
+    // Barrido final por si algo validáramos antes de la última entrega.
+    const complete = extractCompleteOps(buf);
+    if (complete.length > emitted) {
+      for (const raw of complete.slice(emitted)) {
+        for (const op of chatOpsFromArray([raw])) handlers.onOp(op);
+      }
+      emitted = complete.length;
+    }
+
+    if (!replySent) {
+      const m = buf.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (m && m[1] !== undefined) {
+        const reply = m[1].replace(/\\n/g, " ").trim();
+        if (reply) handlers.onReply(reply);
+      }
+    }
+
+    return { provider: result.provider, model: result.model };
+  } catch (err) {
+    console.error("[chatStream]", err);
+    // Si ya entregamos ops, no tratamos el resto como error fatal.
+    return { provider: undefined, model: undefined };
   }
 }

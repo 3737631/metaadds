@@ -1,49 +1,92 @@
-import { NextResponse } from "next/server";
 import { buildSnapshot } from "@/lib/stores/snapshot";
-import { chatEditStore } from "@/lib/stores/chat";
+import { chatEditStoreStream, type ChatOp } from "@/lib/stores/chat";
 
 export const runtime = "nodejs";
 
+function sse(json: unknown): string {
+  return `data: ${JSON.stringify(json)}\n\n`;
+}
+
 export async function POST(req: Request) {
+  let url = "";
+  let request = "";
   try {
     const body = await req.json();
-    const url = typeof body?.url === "string" ? body.url.trim() : "";
-    const request = typeof body?.request === "string" ? body.request.trim() : "";
-    if (!url) {
-      return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: "Falta la URL de la tienda." } },
-        { status: 400 }
-      );
-    }
-    if (!request) {
-      return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: "Escribe qué quieres cambiar." } },
-        { status: 400 }
-      );
-    }
+    url = typeof body?.url === "string" ? body.url.trim() : "";
+    request = typeof body?.request === "string" ? body.request.trim() : "";
+  } catch {
+    /* body inválido */
+  }
 
-    const snapshot = await buildSnapshot(url);
-    if (!snapshot) {
-      return NextResponse.json(
-        { success: false, error: { code: "SNAPSHOT_ERROR", message: "No pudimos capturar la web de la tienda." } },
-        { status: 404 }
-      );
-    }
-
-    const result = await chatEditStore({ html: snapshot.html, domain: snapshot.domain, request });
-    if (!result || result.ops.length === 0) {
-      return NextResponse.json(
-        { success: false, error: { code: "AI_ERROR", message: "No pude traducir tu petición en cambios concretos. Reformúlalo (ej: cambia el titular, cambia el color a rojo, quita el banner de cookies)." } },
-        { status: 422 }
-      );
-    }
-
-    return NextResponse.json({ success: true, data: result });
-  } catch (err) {
-    console.error("[/api/stores/chat]", err);
-    return NextResponse.json(
-      { success: false, error: { code: "CHAT_ERROR", message: "Error procesando tu petición." } },
-      { status: 500 }
+  if (!url || !request) {
+    return Response.json(
+      {
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: !url ? "Falta la URL de la tienda." : "Escribe qué quieres cambiar." },
+      },
+      { status: 400 }
     );
   }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (json: unknown) => controller.enqueue(encoder.encode(sse(json)));
+
+      let snapshot;
+      try {
+        snapshot = await buildSnapshot(url);
+      } catch {
+        snapshot = null;
+      }
+      if (!snapshot) {
+        send({ type: "error", code: "SNAPSHOT_ERROR", message: "No pudimos capturar la web de la tienda." });
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+        return;
+      }
+
+      let delivered = 0;
+      const sendOps = (ops: ChatOp[]) => {
+        if (!ops.length) return;
+        delivered += ops.length;
+        send({ type: "ops", ops });
+      };
+      const sendReply = (text: string) => send({ type: "reply", text });
+
+      let provider: string | undefined;
+      let model: string | undefined;
+      try {
+        const meta = await chatEditStoreStream(
+          { html: snapshot.html, domain: snapshot.domain, request },
+          { onOp: (op) => sendOps([op]), onReply: sendReply }
+        );
+        provider = meta?.provider;
+        model = meta?.model;
+      } catch (err) {
+        console.error("[/api/stores/chat]", err);
+      }
+
+      if (delivered === 0) {
+        send({
+          type: "error",
+          code: "AI_ERROR",
+          message: "No pude traducir tu petición en cambios concretos. Reformúlalo (ej: cambia el titular, cambia el color a rojo, quita el banner de cookies).",
+        });
+      } else {
+        send({ type: "done", provider, model });
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

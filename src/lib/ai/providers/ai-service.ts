@@ -54,6 +54,44 @@ export class AIService {
       `Todos los proveedores fallaron. Último error: ${lastError?.message ?? "desconocido"}`
     );
   }
+
+  async stream(
+    input: AIProviderInput,
+    onDelta: (chunk: string) => void
+  ): Promise<AIProviderResult> {
+    if (this.providers.length === 0) {
+      throw new Error(
+        "No hay proveedores de IA configurados. Añade GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY u OPENAI_API_KEY en .env.local"
+      );
+    }
+
+    let lastError: Error | null = null;
+    const maxAttempts = Math.min(this.providers.length, 3);
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const provider = this.providers[i];
+      try {
+        if (provider.stream) {
+          return await provider.stream(input, onDelta);
+        }
+        // Sin streaming: entrega el texto completo de una vez (aún funciona,
+        // solo que no es incremental).
+        const res = await provider.generate(input);
+        onDelta(res.content);
+        return res;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(
+          `[AIService] ${provider.name} falló en stream (intento ${i + 1}/${maxAttempts}):`,
+          lastError.message
+        );
+      }
+    }
+
+    throw new Error(
+      `Todos los proveedores fallaron en stream. Último error: ${lastError?.message ?? "desconocido"}`
+    );
+  }
 }
 
 let _service: AIService | null = null;

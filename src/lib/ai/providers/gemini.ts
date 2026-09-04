@@ -89,4 +89,71 @@ export class GeminiProvider implements AIProvider {
 
     throw new Error(`Gemini ${lastStatus}: agotado el número de reintentos`);
   }
+
+  async stream(
+    input: AIProviderInput,
+    onDelta: (chunk: string) => void
+  ): Promise<AIProviderResult> {
+    const model = input.model ?? "gemini-3.6-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
+
+    const parts = [{ text: input.userPrompt }];
+    const contents = [{ role: "user", parts }];
+
+    const generationConfig: Record<string, unknown> = {
+      temperature: input.temperature ?? 0.7,
+      maxOutputTokens: input.maxTokens ?? 1600,
+    };
+    if (input.responseFormat === "json") {
+      generationConfig.responseMimeType = "application/json";
+    }
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents, generationConfig }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) {
+      const err = (await res.text().catch(() => "")).slice(0, 200);
+      throw new Error(`Gemini stream ${res.status}: ${err}`);
+    }
+    if (!res.body) throw new Error("Gemini stream: sin cuerpo");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let out = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(payload);
+          const text = chunk?.candidates?.[0]?.content?.parts
+            ?.map((p: { text?: string }) => p.text ?? "")
+            .join("");
+          if (text) {
+            out += text;
+            onDelta(text);
+          }
+        } catch {
+          /* fragmento parcial: se ignora */
+        }
+      }
+    }
+
+    return {
+      content: out,
+      model,
+      provider: this.id,
+    };
+  }
 }
