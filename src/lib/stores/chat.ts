@@ -192,7 +192,8 @@ export async function chatEditStore(opts: {
     return null;
   }
 
-  // Normaliza el sobre: {reply,ops[]}, ops[] directo, o un solo op {selector,...}.
+  // Normaliza el sobre: {reply,ops[]}, {reply,changes[]}, ops[] directo, o un
+  // solo op {selector,...}. También tolera un "action" como operación única.
   let reply = "";
   let opsArr: unknown[] = [];
   if (Array.isArray(json)) {
@@ -201,12 +202,41 @@ export async function chatEditStore(opts: {
     const obj = json as Record<string, unknown>;
     if (typeof obj.reply === "string") reply = obj.reply;
     if (Array.isArray(obj.ops)) opsArr = obj.ops;
-    else if (obj.selector) opsArr = [json];
+    else if (Array.isArray(obj.changes)) opsArr = obj.changes;
+    else if (obj.selector || obj.op || obj.action || obj.type) opsArr = [json];
   }
 
-  const ops = opsArr
-    .map((o) => toChatOp(o))
-    .filter((o): o is ChatOp => o !== null);
+  // Aplana cada op entrante: un objeto con "style" anidado (ej.
+  // {prop:"color", value:"navy"} o {color:"navy", ...}) produce varias
+  // operaciones setStyle.
+  const flat: ChatOp[] = [];
+  const pushOp = (op: ChatOp | null) => {
+    if (op) flat.push(op);
+  };
+  for (const o of opsArr) {
+    if (o && typeof o === "object") {
+      const c = o as Record<string, unknown>;
+      if (c.style && typeof c.style === "object" && !Array.isArray(c.style)) {
+        const base = stylePropsToSetStyle(o);
+        if (base) {
+          const entries = Object.entries(c.style as Record<string, unknown>);
+          if (entries.length) {
+            entries.forEach(([prop, value]) => {
+              if (prop === "display" && /^\s*none\s*!?important/i.test(String(value))) {
+                pushOp({ op: "hide", selector: base.selector });
+              } else if (typeof value === "string" || typeof value === "number") {
+                pushOp({ op: "setStyle", selector: base.selector, prop, value: String(value) });
+              }
+            });
+            continue;
+          }
+        }
+      }
+    }
+    pushOp(toChatOp(o));
+  }
+
+  const ops = flat.filter((o): o is ChatOp => o !== null);
   if (ops.length === 0) {
     console.error("[/chat] sin ops aplicables. Respuesta IA:", result.content.slice(0, 3000));
   }
@@ -220,27 +250,42 @@ export async function chatEditStore(opts: {
 
 /** Normaliza un nombre de operación que la IA pueda escribir de varias formas. */
 function normOp(op: string): string {
-  const key = op.toLowerCase().replace(/[\s_-]/g, "");
+  const key = op.toLowerCase().replace(/[\s_/-]/g, "");
   switch (key) {
     case "replacetext":
     case "settext":
     case "setcontent":
+    case "changetext":
+    case "modifytext":
+    case "updatetext":
+    case "edittext":
+    case "text":
+    case "change":
       return "replaceText";
     case "replaceinner":
+    case "setinner":
+    case "sethtml":
       return "replaceInner";
     case "setstyle":
     case "style":
     case "setcss":
+    case "modifystyle":
+    case "updatestyle":
+    case "changestyle":
+    case "css":
       return "setStyle";
     case "setimage":
     case "image":
     case "setimg":
+    case "changeimage":
       return "setImage";
     case "setattr":
     case "setattribute":
+    case "attr":
       return "setAttr";
     case "hide":
     case "hidden":
+    case "displaynone":
       return "hide";
     case "remove":
     case "delete":
@@ -251,20 +296,50 @@ function normOp(op: string): string {
   }
 }
 
+/**
+ * Si `o` trae un `style` anidado (objeto clave/valor) devuelve el selector base
+ * (para generar un setStyle por propiedad), o null si no hay selector usable.
+ */
+function stylePropsToSetStyle(o: unknown): { selector: string } | null {
+  if (!o || typeof o !== "object") return null;
+  const c = o as Record<string, unknown>;
+  let selector: unknown = c.selector;
+  if (typeof selector !== "string") selector = c.sel;
+  if (typeof selector !== "string" || !selector.trim()) return null;
+  const st = c.style;
+  if (!st || typeof st !== "object" || Array.isArray(st)) return null;
+  if (!Object.keys(st as Record<string, unknown>).length) return null;
+  return { selector: selector.trim() };
+}
+
 /** Devuelve un ChatOp canónico si `o` es una op válida (tolera aliases de campos). */
 function toChatOp(o: unknown): ChatOp | null {
   if (!o || typeof o !== "object") return null;
   const c = o as Record<string, unknown>;
-  const op0 = typeof c.op === "string" ? c.op : typeof c.action === "string" ? c.action : c.type;
-  if (typeof op0 !== "string") return null;
-  const op = normOp(op0);
-  // injectCss no necesita selector: se aplica como <style> global.
-  if (op === "injectCss" || op === "injectcss" || op === "css" || op === "styleblock" || op === "addstyle") {
-    let css =
-      typeof c.css === "string" ? c.css : typeof c.rule === "string" ? c.rule : typeof c.value === "string" ? c.value : "";
-    css = String(css ?? "").trim();
-    return css ? { op: "injectCss", css: css as string } : null;
+  const op0 = typeof c.op === "string" ? c.op : typeof c.action === "string" ? c.action : typeof c.type === "string" ? c.type : "";
+  let op = op0 ? normOp(op0) : "";
+  if (op) {
+    // injectCss no necesita selector: se aplica como <style> global.
+    if (op === "injectCss" || op === "injectcss" || op === "css" || op === "styleblock" || op === "addstyle") {
+      let css =
+        typeof c.css === "string" ? c.css : typeof c.rule === "string" ? c.rule : typeof c.value === "string" ? c.value : "";
+      css = String(css ?? "").trim();
+      return css ? { op: "injectCss", css: css as string } : null;
+    }
   }
+  // Si no hay op/action explícito, deduce por heurística según campos presentes.
+  if (!op) {
+    if (c.style && typeof c.style === "object" && !Array.isArray(c.style)) op = "setStyle";
+    else if (c.src && typeof c.src === "string") op = "setImage";
+    else if (c.attr && typeof c.attr === "string") op = "setAttr";
+    else if (typeof c.html === "string") op = "replaceInner";
+    else if (c.hide === true || c.hidden === true) op = "hide";
+    else if (c.remove === true) op = "remove";
+    else if (typeof c.text === "string") op = "replaceText";
+    else if (c.display && String(c.display).toLowerCase().includes("none")) op = "hide";
+  }
+  if (!op) return null;
+
   let selector: unknown = c.selector;
   if (typeof selector !== "string") selector = c.sel;
   if (typeof selector !== "string" || !selector.trim()) return null;
