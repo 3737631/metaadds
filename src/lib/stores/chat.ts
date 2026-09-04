@@ -625,6 +625,10 @@ export async function chatEditStoreStream(
       }
     }
 
+    if (extractCompleteOps(buf).length === 0) {
+      console.error("[chatStream][DEBUG] no-ops raw buf:", buf.slice(0, 4000));
+    }
+
     return { provider: result.provider, model: result.model };
   } catch (err) {
     console.error("[chatStream]", err);
