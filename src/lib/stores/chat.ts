@@ -327,6 +327,14 @@ function toChatOp(o: unknown): ChatOp | null {
       return css ? { op: "injectCss", css: css as string } : null;
     }
   }
+  // Dialecto: {selector: "h2", css: "color: navy; font-style: italic;"} -> aplica
+  // esas declaraciones al selector mediante una regla de estilos global.
+  const rawCss = typeof c.css === "string" ? c.css : "";
+  const rawSel = c.selector ?? c.sel;
+  const cssSel = typeof rawSel === "string" ? rawSel.trim() : "";
+  if (rawCss.trim() && cssSel) {
+    return { op: "injectCss", css: `${cssSel} { ${rawCss} }` };
+  }
   // Si no hay op/action explícito, deduce por heurística según campos presentes.
   if (!op) {
     if (c.style && typeof c.style === "object" && !Array.isArray(c.style)) op = "setStyle";
