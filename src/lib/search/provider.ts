@@ -25,12 +25,13 @@ export const SEARCH_PROVIDERS: Record<SearchProviderName, string> = {
 
 export function isBlockedDomain(url: string): boolean {
   try {
-    const host = new URL(url).hostname.toLowerCase();
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
     const blocked = [
       "amazon.", "amzn.", "aliexpress", "temu.", "ebay.", "pinterest.",
       "tiktok.", "instagram.", "facebook.", "youtube.", "etsy.com",
-      "walmart.com", "shein.com", "wish.com",
+      "walmart.com", "shein.com", "wish.com", "shopify.dev",
     ];
+    if (host === "shopify.com") return true;
     for (const b of blocked) {
       if (host.includes(b)) return true;
     }
