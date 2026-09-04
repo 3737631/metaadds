@@ -61,7 +61,7 @@ export async function POST(req: Request) {
           { html: snapshot.html, domain: snapshot.domain, request },
           { onOp: (op) => sendOps([op]), onReply: sendReply }
         );
-        const timeoutTask = new Promise<null>((resolve) => setTimeout(() => resolve(null), 90_000));
+        const timeoutTask = new Promise<null>((resolve) => setTimeout(() => resolve(null), 150_000));
         const meta = await Promise.race([streamTask, timeoutTask]);
         provider = meta?.provider;
         model = meta?.model;

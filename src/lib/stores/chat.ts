@@ -1,4 +1,5 @@
 import { getAIService } from "@/lib/ai/providers/ai-service";
+import type { AIProviderResult } from "@/lib/ai/providers/types";
 
 /**
  * Operación de edición concreta que la IA devuelve para aplicar sobre la
@@ -668,104 +669,150 @@ export async function chatEditStoreStream(
   const service = getAIService();
   if (!service.available) return null;
 
-  let buf = "";
-  let emitted = 0;
-  let replySent = false;
+  const maxAttempts = Math.min(service.providerCount, 3);
+  const ATTEMPT_TIMEOUT = 65_000;
 
-  try {
-    const result = await service.stream({
-      systemPrompt: buildSystemPrompt(),
-      userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
-      responseFormat: "json",
-      temperature: 0.4,
-      maxTokens: isLanguageChange(opts.request) ? 10000 : 2048,
-    }, (delta) => {
-      buf += delta;
+  // Reintentamos proveedor a proveedor hasta conseguir al menos una operación
+  // real: si un modelo responde con 0 ops o se cuelga, descartamos y probamos
+  // con el siguiente.
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let buf = "";
+    let emitted = 0;
+    let replySent = false;
+    const delivered: ChatOp[] = [];
 
-      // reply: se envía cuando la cadena del campo "reply" queda cerrada.
+    let streamTask: Promise<AIProviderResult | null>;
+    try {
+      streamTask = service
+        .streamAt(
+          attempt,
+          {
+            systemPrompt: buildSystemPrompt(),
+            userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
+            responseFormat: "json",
+            temperature: 0.4,
+            maxTokens: isLanguageChange(opts.request) ? 10000 : 2048,
+          },
+          (delta) => {
+            buf += delta;
+
+            // reply: se envía cuando la cadena del campo "reply" queda cerrada.
+            if (!replySent) {
+              const m = buf.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+              if (m && m[1] !== undefined) {
+                replySent = true;
+                const reply = m[1].replace(/\\n/g, " ").trim();
+                if (reply) handlers.onReply(reply);
+              }
+            }
+
+            // ops: enviamos solo las operaciones completas nuevas, en vivo.
+            const complete = extractCompleteOps(buf);
+            if (complete.length > emitted) {
+              for (const raw of complete.slice(emitted)) {
+                for (const op of chatOpsFromArray([raw])) {
+                  delivered.push(op);
+                  handlers.onOp(op);
+                }
+              }
+              emitted = complete.length;
+            }
+          }
+        )
+        .catch((err) => {
+          console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} falló:`, err);
+          return null;
+        });
+    } catch (err) {
+      console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} no pudo arrancar:`, err);
+      continue;
+    }
+
+    const timeoutTask = new Promise<null>((resolve) => setTimeout(() => resolve(null), ATTEMPT_TIMEOUT));
+    const outcome = await Promise.race([streamTask, timeoutTask]);
+
+    if (!outcome) {
+      console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} agotó ${ATTEMPT_TIMEOUT / 1000}s sin terminar, paso al siguiente`);
+      continue;
+    }
+
+    // Barrido final por si algo quedó en el buffer entre eventos.
+    {
+      const complete = extractCompleteOps(buf);
+      if (complete.length > emitted) {
+        for (const raw of complete.slice(emitted)) {
+          for (const op of chatOpsFromArray([raw])) {
+            delivered.push(op);
+            handlers.onOp(op);
+          }
+        }
+        emitted = complete.length;
+      }
+
       if (!replySent) {
         const m = buf.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
         if (m && m[1] !== undefined) {
-          replySent = true;
           const reply = m[1].replace(/\\n/g, " ").trim();
           if (reply) handlers.onReply(reply);
         }
       }
 
-      // ops: enviamos solo las operaciones completas nuevas.
-      const complete = extractCompleteOps(buf);
-      if (complete.length > emitted) {
-        for (const raw of complete.slice(emitted)) {
-          for (const op of chatOpsFromArray([raw])) handlers.onOp(op);
-        }
-        emitted = complete.length;
-      }
-    });
-
-    // Barrido final por si algo validáramos antes de la última entrega.
-    const complete = extractCompleteOps(buf);
-    if (complete.length > emitted) {
-      for (const raw of complete.slice(emitted)) {
-        for (const op of chatOpsFromArray([raw])) handlers.onOp(op);
-      }
-      emitted = complete.length;
-    }
-
-    if (!replySent) {
-      const m = buf.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-      if (m && m[1] !== undefined) {
-        const reply = m[1].replace(/\\n/g, " ").trim();
-        if (reply) handlers.onReply(reply);
-      }
-    }
-
-    if (isLanguageChange(opts.request) && extractCompleteOps(buf).length === 0) {
-      console.error("[chatStream] respuesta sin ops parseables. buf:", buf.slice(0, 1200));
-    }
-
-    // Fallback batch: si el streaming no extrajo ninguna op (dialecto no reconocido
-    // en streaming, respuesta envuelta en markdown, etc.), parseamos el buf completo
-    // con repairJson + normalize (mismo camino que chatEditStore batch).
-    if (emitted === 0) {
-      try {
-        console.error("[chatStream] fallback: 0 ops extraídos por streaming, intentando repairJson+normalize sobre buf completo");
-        const repaired = repairJson(buf);
-        if (repaired && typeof repaired === "object") {
-          let fReply = "";
-          let fOpsArr: unknown[] = [];
-          if (Array.isArray(repaired)) {
-            fOpsArr = repaired;
-          } else {
-            const robj = repaired as Record<string, unknown>;
-            if (typeof robj.reply === "string") fReply = robj.reply;
-            if (Array.isArray(robj.ops)) fOpsArr = robj.ops;
-            else if (Array.isArray(robj.changes)) fOpsArr = robj.changes;
-            else if (
-              robj.selector || robj.op || robj.action || robj.type || robj.tipo || robj.accion ||
-              robj.css || robj.css_code || robj.cssCode || robj.css_text || robj.rule ||
-              robj.text || robj.html || robj.src || robj.style || robj.styles || robj.attr ||
-              robj.newText || robj.hide === true || robj.hidden === true || robj.remove === true || robj.display !== undefined
-            ) {
-              fOpsArr = [robj];
+      // Fallback batch: si el streaming no extrajo ninguna op (dialecto no
+      // reconocido, respuesta envuelta en markdown, etc.), parseamos el buf
+      // completo con repairJson + normalize (mismo camino que el batch).
+      if (emitted === 0) {
+        try {
+          const repaired = repairJson(buf);
+          if (repaired && typeof repaired === "object") {
+            let fReply = "";
+            let fOpsArr: unknown[] = [];
+            if (Array.isArray(repaired)) {
+              fOpsArr = repaired;
+            } else {
+              const robj = repaired as Record<string, unknown>;
+              if (typeof robj.reply === "string") fReply = robj.reply;
+              if (Array.isArray(robj.ops)) fOpsArr = robj.ops;
+              else if (Array.isArray(robj.changes)) fOpsArr = robj.changes;
+              else if (
+                robj.selector || robj.op || robj.action || robj.type || robj.tipo || robj.accion ||
+                robj.css || robj.css_code || robj.cssCode || robj.css_text || robj.rule ||
+                robj.text || robj.html || robj.src || robj.style || robj.styles || robj.attr ||
+                robj.newText || robj.hide === true || robj.hidden === true || robj.remove === true || robj.display !== undefined
+              ) {
+                fOpsArr = [robj];
+              }
+            }
+            const fOps = chatOpsFromArray(fOpsArr);
+            if (fOps.length > 0) {
+              for (const op of fOps) {
+                delivered.push(op);
+                handlers.onOp(op);
+              }
+              if (fReply && !replySent) handlers.onReply(fReply);
+              emitted = fOps.length;
+              console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} fallback OK: ${fOps.length} ops`);
             }
           }
-          const fOps = chatOpsFromArray(fOpsArr);
-          if (fOps.length > 0) {
-            for (const op of fOps) handlers.onOp(op);
-            if (fReply && !replySent) handlers.onReply(fReply);
-            console.error(`[chatStream] fallback OK: ${fOps.length} ops extraídos`);
-            return { provider: result.provider, model: result.model };
-          }
+        } catch (fbErr) {
+          console.error("[chatStream] fallback error:", fbErr);
         }
-      } catch (fbErr) {
-        console.error("[chatStream] fallback error:", fbErr);
       }
     }
 
-    return { provider: result.provider, model: result.model };
-  } catch (err) {
-    console.error("[chatStream]", err);
-    // Si ya entregamos ops, no tratamos el resto como error fatal.
-    return { provider: undefined, model: undefined };
+    if (delivered.length === 0) {
+      console.warn(
+        `[chatStream] intento ${attempt + 1}/${maxAttempts} dio 0 ops (${outcome.provider}/${outcome.model}) — reintentando con el siguiente proveedor`
+      );
+      if (isLanguageChange(opts.request)) {
+        console.error("[chatStream][DEBUG] lang-change raw buf:", buf.slice(0, 6000));
+      }
+      continue;
+    }
+
+    console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} OK: ${delivered.length} ops (${outcome.provider}/${outcome.model})`);
+    return { provider: outcome.provider, model: outcome.model };
   }
+
+  console.error("[chatStream] todos los proveedores terminaron sin producir ops");
+  return { provider: undefined, model: undefined };
 }

@@ -257,7 +257,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       }
       setStreamingReply(null);
       setError(e instanceof Error ? e.message : "Error al aplicar el cambio");
-      setChatMsgs((prev) => [...prev, { role: "sys", text: "No pude aplicar tu petición. Inténtalo de nuevo." }]);
+      setChatMsgs((prev) => [...prev, { role: "sys", text: e instanceof Error && e.message ? e.message : "No pude aplicar tu petición. Inténtalo de nuevo." }]);
     } finally {
       setChatLoading(false);
     }

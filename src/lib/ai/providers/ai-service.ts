@@ -27,6 +27,26 @@ export class AIService {
     return this.providers.map((p) => p.name);
   }
 
+  get providerCount(): number {
+    return this.providers.length;
+  }
+
+  /** Llama al streaming del proveedor `index` concreto (sin failover interno). */
+  async streamAt(
+    index: number,
+    input: AIProviderInput,
+    onDelta: (chunk: string) => void
+  ): Promise<AIProviderResult> {
+    const provider = this.providers[index];
+    if (!provider) throw new Error(`No hay proveedor en el índice ${index}`);
+    if (provider.stream) {
+      return await provider.stream(input, onDelta);
+    }
+    const res = await provider.generate(input);
+    onDelta(res.content);
+    return res;
+  }
+
   async generate(input: AIProviderInput): Promise<AIProviderResult> {
     if (this.providers.length === 0) {
       throw new Error(
