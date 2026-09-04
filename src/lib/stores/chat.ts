@@ -221,7 +221,9 @@ export async function chatEditStore(opts: {
           ? c.style
           : c.css && typeof c.css === "object" && !Array.isArray(c.css)
             ? c.css
-            : null;
+            : c.styles && typeof c.styles === "object" && !Array.isArray(c.styles)
+              ? c.styles
+              : null;
       if (styleSource) {
         const base = stylePropsToSetStyle(o);
         if (base) {
@@ -317,7 +319,9 @@ function stylePropsToSetStyle(o: unknown): { selector: string } | null {
       ? c.style
       : c.css && typeof c.css === "object" && !Array.isArray(c.css)
         ? c.css
-        : null;
+        : c.styles && typeof c.styles === "object" && !Array.isArray(c.styles)
+          ? c.styles
+          : null;
   if (!st || typeof st !== "object" || Array.isArray(st)) return null;
   if (!Object.keys(st as Record<string, unknown>).length) return null;
   return { selector: selector.trim() };
