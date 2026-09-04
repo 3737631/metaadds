@@ -216,10 +216,16 @@ export async function chatEditStore(opts: {
   for (const o of opsArr) {
     if (o && typeof o === "object") {
       const c = o as Record<string, unknown>;
-      if (c.style && typeof c.style === "object" && !Array.isArray(c.style)) {
+      const styleSource =
+        c.style && typeof c.style === "object" && !Array.isArray(c.style)
+          ? c.style
+          : c.css && typeof c.css === "object" && !Array.isArray(c.css)
+            ? c.css
+            : null;
+      if (styleSource) {
         const base = stylePropsToSetStyle(o);
         if (base) {
-          const entries = Object.entries(c.style as Record<string, unknown>);
+          const entries = Object.entries(styleSource as Record<string, unknown>);
           if (entries.length) {
             entries.forEach(([prop, value]) => {
               if (prop === "display" && /^\s*none\s*!?important/i.test(String(value))) {
@@ -306,7 +312,12 @@ function stylePropsToSetStyle(o: unknown): { selector: string } | null {
   let selector: unknown = c.selector;
   if (typeof selector !== "string") selector = c.sel;
   if (typeof selector !== "string" || !selector.trim()) return null;
-  const st = c.style;
+  const st =
+    c.style && typeof c.style === "object" && !Array.isArray(c.style)
+      ? c.style
+      : c.css && typeof c.css === "object" && !Array.isArray(c.css)
+        ? c.css
+        : null;
   if (!st || typeof st !== "object" || Array.isArray(st)) return null;
   if (!Object.keys(st as Record<string, unknown>).length) return null;
   return { selector: selector.trim() };
