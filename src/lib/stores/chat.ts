@@ -146,7 +146,8 @@ REGLAS:
 - Si la instrucción pide quitar banners de cookies, popups de newsletter, avisos legales o "basura", añade ops 'remove' con selectores basados en clases/texto típicas (p.ej. '#onetrust-banner-sdk', '.cookie-consent', '#cookie-banner', '#newsletter-popup', '.mailpoet_popup', div cuyo texto contenga 'aceptar cookies'). Selecciona por clase/id si los ves, y si no por un selector de atributo data o por índice; es aceptable un selector que cubra los candidatos razonables.
 - No inventes selectores que no existan: si no puedes decidir, usa el más probable y añade en "reply" que revises la parte concreta.
 - Mantén el promedio. No cambies nada que la instrucción no pida.
-- El texto base de la web va en español salvo que la instrucción diga otra cosa.`;
+- El texto base de la web va en español salvo que la instrucción diga otra cosa.
+- TRADUCCIÓN DE IDIOMA: si el usuario pide 'pon la web en inglés' (u otro idioma), NO te limites a responder: emite ops 'replaceText' (y 'setAttr' para los lang si procede) que traduzcan al idioma pedido TODOS los textos visibles que encuentres en el HTML (titulares h1/h2/h3, párrafos, botones, enlaces de menú, p.ej. 'ACERCA DE NOSOTROS'→'ABOUT US', 'INICIO'→'HOME', 'Comprar'→'Buy Now'). Traduce cada texto que aparezca, uno por uno, con su selector real. Si hay muchos, cubre al menos los titulares principales, menú, botones y párrafos más visibles.`;
 }
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
