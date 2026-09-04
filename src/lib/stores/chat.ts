@@ -203,7 +203,14 @@ export async function chatEditStore(opts: {
     if (typeof obj.reply === "string") reply = obj.reply;
     if (Array.isArray(obj.ops)) opsArr = obj.ops;
     else if (Array.isArray(obj.changes)) opsArr = obj.changes;
-    else if (obj.selector || obj.op || obj.action || obj.type) opsArr = [json];
+    else if (
+      obj.selector || obj.op || obj.action || obj.type || obj.tipo || obj.accion ||
+      obj.css || obj.css_code || obj.cssCode || obj.css_text || obj.rule ||
+      obj.text || obj.html || obj.src || obj.style || obj.styles || obj.attr ||
+      obj.hide === true || obj.hidden === true || obj.remove === true ||
+      obj.display !== undefined
+    )
+      opsArr = [json];
   }
 
   // Aplana cada op entrante: un objeto con "style" anidado (ej.
