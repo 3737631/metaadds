@@ -691,7 +691,7 @@ export async function chatEditStoreStream(
             userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
             responseFormat: "json",
             temperature: 0.4,
-            maxTokens: isLanguageChange(opts.request) ? 10000 : 2048,
+            maxTokens: isLanguageChange(opts.request) ? 5000 : 2048,
           },
           (delta) => {
             buf += delta;
@@ -728,13 +728,18 @@ export async function chatEditStoreStream(
       continue;
     }
 
-    const timeoutTask = new Promise<null>((resolve) => setTimeout(() => resolve(null), ATTEMPT_TIMEOUT));
+    const TIMEOUT = Symbol("timeout");
+    const timeoutTask = new Promise<symbol>((resolve) => setTimeout(() => resolve(TIMEOUT), ATTEMPT_TIMEOUT));
     const outcome = await Promise.race([streamTask, timeoutTask]);
 
-    if (!outcome) {
-      console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} agotó ${ATTEMPT_TIMEOUT / 1000}s sin terminar, paso al siguiente`);
+    let result: AIProviderResult | null = null;
+    if (!outcome || outcome === TIMEOUT) {
+      console.warn(
+        `[chatStream] intento ${attempt + 1}/${maxAttempts} ${outcome === TIMEOUT ? `agotó ${ATTEMPT_TIMEOUT / 1000}s sin terminar` : "terminó sin resultado (error)"}, paso al siguiente`
+      );
       continue;
     }
+    result = outcome as AIProviderResult;
 
     // Barrido final por si algo quedó en el buffer entre eventos.
     {
@@ -801,7 +806,7 @@ export async function chatEditStoreStream(
 
     if (delivered.length === 0) {
       console.warn(
-        `[chatStream] intento ${attempt + 1}/${maxAttempts} dio 0 ops (${outcome.provider}/${outcome.model}) — reintentando con el siguiente proveedor`
+        `[chatStream] intento ${attempt + 1}/${maxAttempts} dio 0 ops (${result!.provider}/${result!.model}) — reintentando con el siguiente proveedor`
       );
       if (isLanguageChange(opts.request)) {
         console.error("[chatStream][DEBUG] lang-change raw buf:", buf.slice(0, 6000));
@@ -809,8 +814,8 @@ export async function chatEditStoreStream(
       continue;
     }
 
-    console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} OK: ${delivered.length} ops (${outcome.provider}/${outcome.model})`);
-    return { provider: outcome.provider, model: outcome.model };
+    console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} OK: ${delivered.length} ops (${result!.provider}/${result!.model})`);
+    return { provider: result!.provider, model: result!.model };
   }
 
   console.error("[chatStream] todos los proveedores terminaron sin producir ops");
