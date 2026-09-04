@@ -146,6 +146,14 @@ const EDITOR_SCRIPT = `
 const OPS_RECEIVER = `
 (function () {
   var apply = function (op) {
+    if (op.op === 'injectCss' && op.css) {
+      try {
+        var st = document.createElement('style');
+        st.textContent = op.css;
+        (document.head || document.documentElement).appendChild(st);
+        return { ok: true, selector: 'CSS' };
+      } catch (e) { return { ok: false, selector: 'CSS' }; }
+    }
     var els = Array.prototype.slice.call(document.querySelectorAll(op.selector || ''));
     var val = op.value !== undefined ? op.value : (op.text !== undefined ? op.text : (op.src !== undefined ? op.src : (op.html !== undefined ? op.html : '')));
     if (!els.length) {

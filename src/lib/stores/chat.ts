@@ -11,7 +11,8 @@ export type ChatOp =
   | { op: "setImage"; selector: string; src: string }
   | { op: "setAttr"; selector: string; attr: string; value: string }
   | { op: "hide"; selector: string }
-  | { op: "remove"; selector: string };
+  | { op: "remove"; selector: string }
+  | { op: "injectCss"; css: string };
 
 export interface ChatEditResult {
   reply: string;
@@ -57,12 +58,15 @@ Devuelve SOLO JSON válido con la siguiente forma EXACTA:
     { "op": "setAttr", "selector": "CSS selector", "attr": "href", "value": "https://..." },
     { "op": "replaceInner", "selector": "CSS selector", "html": "HTML de reemplazo" },
     { "op": "hide", "selector": "CSS selector" },
-    { "op": "remove", "selector": "CSS selector" }
+    { "op": "remove", "selector": "CSS selector" },
+    { "op": "injectCss", "css": "reglas CSS globales que transforman TODA la web" }
   ]
 }
 
 REGLAS:
 - Los selectores deben apuntar a elementos EXISTENTES en el HTML que se te envía (usa texto visible entre comillas si ayuda, p. ej. 'a:has-text(...)' NO existe; usa selectores CSS reales: h1, .clase, #id, [data-*], o el Nº de índice). Prefiere selectores robustos y únicos: etiqueta (h1), .clase conocida, o [título de sección].
+- Para cambios GLOBALES de toda la web (cambiar TODOS los rojos por azul, cambiar la tipografía, el color de fondo general, tamaños, espaciados) usa UNA op 'injectCss' con reglas CSS universales (body, h1,h2,h3, p, a, .btn, *). Por ejemplo para cambiar todos los rojos a azul: {"op":"injectCss","css":"*{color:#0055ff !important} a,#btn{color:#0055ff} .some-red-bg{background:#0055ff}"}. Eso es mucho más fiable que decenas de setStyle.
+- Cuando el cambio afecte a un solo elemento (p. ej. cambiar el titular principal) usa replaceText/setStyle puntuales.
 - Si la instrucción pide quitar banners de cookies, popups de newsletter, avisos legales o "basura", añade ops 'remove' con selectores basados en clases/texto típicas (p.ej. '#onetrust-banner-sdk', '.cookie-consent', '#cookie-banner', '#newsletter-popup', '.mailpoet_popup', div cuyo texto contenga 'aceptar cookies'). Selecciona por clase/id si los ves, y si no por un selector de atributo data o por índice; es aceptable un selector que cubra los candidatos razonables.
 - No inventes selectores que no existan: si no puedes decidir, usa el más probable y añade en "reply" que revises la parte concreta.
 - Mantén el promedio. No cambies nada que la instrucción no pida.
@@ -71,7 +75,7 @@ REGLAS:
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
   const bodyOnly = extractBody(html);
-  const safe = bodyOnly.slice(0, 7000);
+  const safe = bodyOnly.slice(0, 12000);
   return `TENDA / DOMINIO: ${domain}
 
 INSTRUCCIÓN DEL USUARIO: ${request}
@@ -103,7 +107,7 @@ export async function chatEditStore(opts: {
     userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
     responseFormat: "json",
     temperature: 0.4,
-    maxTokens: 1024,
+    maxTokens: 2048,
   });
 
   const json = repairJson(result.content);
@@ -196,6 +200,12 @@ function toChatOp(o: unknown): ChatOp | null {
       return { op: "hide", selector };
     case "remove":
       return { op: "remove", selector };
+    case "injectCss":
+    case "injectcss":
+    case "css":
+    case "styleblock":
+    case "addstyle":
+      return { op: "injectCss", css: String(typeof c.css === "string" ? c.css : value) };
     default:
       return null;
   }
