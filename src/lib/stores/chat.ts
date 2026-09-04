@@ -723,6 +723,45 @@ export async function chatEditStoreStream(
       console.error("[chatStream] respuesta sin ops parseables. buf:", buf.slice(0, 1200));
     }
 
+    // Fallback batch: si el streaming no extrajo ninguna op (dialecto no reconocido
+    // en streaming, respuesta envuelta en markdown, etc.), parseamos el buf completo
+    // con repairJson + normalize (mismo camino que chatEditStore batch).
+    if (emitted === 0) {
+      try {
+        console.error("[chatStream] fallback: 0 ops extraídos por streaming, intentando repairJson+normalize sobre buf completo");
+        const repaired = repairJson(buf);
+        if (repaired && typeof repaired === "object") {
+          let fReply = "";
+          let fOpsArr: unknown[] = [];
+          if (Array.isArray(repaired)) {
+            fOpsArr = repaired;
+          } else {
+            const robj = repaired as Record<string, unknown>;
+            if (typeof robj.reply === "string") fReply = robj.reply;
+            if (Array.isArray(robj.ops)) fOpsArr = robj.ops;
+            else if (Array.isArray(robj.changes)) fOpsArr = robj.changes;
+            else if (
+              robj.selector || robj.op || robj.action || robj.type || robj.tipo || robj.accion ||
+              robj.css || robj.css_code || robj.cssCode || robj.css_text || robj.rule ||
+              robj.text || robj.html || robj.src || robj.style || robj.styles || robj.attr ||
+              robj.newText || robj.hide === true || robj.hidden === true || robj.remove === true || robj.display !== undefined
+            ) {
+              fOpsArr = [robj];
+            }
+          }
+          const fOps = chatOpsFromArray(fOpsArr);
+          if (fOps.length > 0) {
+            for (const op of fOps) handlers.onOp(op);
+            if (fReply && !replySent) handlers.onReply(fReply);
+            console.error(`[chatStream] fallback OK: ${fOps.length} ops extraídos`);
+            return { provider: result.provider, model: result.model };
+          }
+        }
+      } catch (fbErr) {
+        console.error("[chatStream] fallback error:", fbErr);
+      }
+    }
+
     return { provider: result.provider, model: result.model };
   } catch (err) {
     console.error("[chatStream]", err);
