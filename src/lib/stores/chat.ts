@@ -338,14 +338,24 @@ function toChatOp(o: unknown): ChatOp | null {
     // injectCss no necesita selector: se aplica como <style> global.
     if (op === "injectCss" || op === "injectcss" || op === "css" || op === "styleblock" || op === "addstyle") {
       let css =
-        typeof c.css === "string" ? c.css : typeof c.rule === "string" ? c.rule : typeof c.value === "string" ? c.value : "";
+        typeof c.css === "string" ? c.css
+          : typeof c.css_code === "string" ? c.css_code
+            : typeof c.cssCode === "string" ? c.cssCode
+              : typeof c.css_text === "string" ? c.css_text
+                : typeof c.rule === "string" ? c.rule
+                  : typeof c.value === "string" ? c.value
+                    : "";
       css = String(css ?? "").trim();
       return css ? { op: "injectCss", css: css as string } : null;
     }
   }
-  // Dialecto: {selector: "h2", css: "color: navy; font-style: italic;"} -> aplica
-  // esas declaraciones al selector mediante una regla de estilos global.
-  const rawCss = typeof c.css === "string" ? c.css : "";
+  // Obtiene el CSS en forma de bloque (string) tolerando claves comunes.
+  const rawCss = typeof c.css === "string" ? c.css
+    : typeof c.css_code === "string" ? c.css_code
+      : typeof c.cssCode === "string" ? c.cssCode
+        : typeof c.css_text === "string" ? c.css_text
+          : typeof c.rule === "string" ? c.rule
+            : "";
   const rawSel = c.selector ?? c.sel;
   const cssSel = typeof rawSel === "string" ? rawSel.trim() : "";
   if (rawCss.trim() && cssSel) {
