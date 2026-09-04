@@ -21,6 +21,51 @@ export interface ChatEditResult {
   model?: string;
 }
 
+/** Limpia JSON salido de un LLM: quita comentarios // y /* *\/ y comas finales, sin tocar strings. */
+function cleanJsonLLM(raw: string): string {
+  let out = "";
+  let inStr = false;
+  let i = 0;
+  const s = raw;
+  while (i < s.length) {
+    const ch = s[i];
+    if (inStr) {
+      out += ch;
+      if (ch === "\\") {
+        out += i + 1 < s.length ? s[i + 1] : "";
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inStr = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && s[i + 1] === "/") {
+      while (i < s.length && s[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && s[i + 1] === "*") {
+      i += 2;
+      while (i < s.length && !(s[i] === "*" && s[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === "," && (s[i + 1] === "}" || s[i + 1] === "]")) {
+      i += 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 function repairJson(raw: string): unknown | null {
   let cleaned = raw.trim();
   const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -28,7 +73,7 @@ function repairJson(raw: string): unknown | null {
   // Si es un array de ops (la IA a veces no envuelve en {reply,ops}), intenta parsearlo directamente.
   if (cleaned.startsWith("[")) {
     try {
-      return JSON.parse(cleaned);
+      return JSON.parse(cleanJsonLLM(cleaned));
     } catch {
       return null;
     }
@@ -37,7 +82,7 @@ function repairJson(raw: string): unknown | null {
   const b = cleaned.lastIndexOf("}");
   if (a >= 0 && b > a) cleaned = cleaned.slice(a, b + 1);
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(cleanJsonLLM(cleaned));
   } catch {
     return null;
   }
@@ -179,6 +224,13 @@ function toChatOp(o: unknown): ChatOp | null {
   const op0 = typeof c.op === "string" ? c.op : typeof c.action === "string" ? c.action : c.type;
   if (typeof op0 !== "string") return null;
   const op = normOp(op0);
+  // injectCss no necesita selector: se aplica como <style> global.
+  if (op === "injectCss" || op === "injectcss" || op === "css" || op === "styleblock" || op === "addstyle") {
+    let css =
+      typeof c.css === "string" ? c.css : typeof c.rule === "string" ? c.rule : typeof c.value === "string" ? c.value : "";
+    css = String(css ?? "").trim();
+    return css ? { op: "injectCss", css: css as string } : null;
+  }
   let selector: unknown = c.selector;
   if (typeof selector !== "string") selector = c.sel;
   if (typeof selector !== "string" || !selector.trim()) return null;
@@ -200,12 +252,6 @@ function toChatOp(o: unknown): ChatOp | null {
       return { op: "hide", selector };
     case "remove":
       return { op: "remove", selector };
-    case "injectCss":
-    case "injectcss":
-    case "css":
-    case "styleblock":
-    case "addstyle":
-      return { op: "injectCss", css: String(typeof c.css === "string" ? c.css : value) };
     default:
       return null;
   }

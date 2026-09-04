@@ -11,9 +11,10 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   async generate(input: AIProviderInput): Promise<AIProviderResult> {
-    // Por defecto usamos un modelo gratuito (:free) para no gastar los créditos
-    // de la cuenta. Solo se consume saldo si el llamador pide un modelo de pago.
-    const model = input.model ?? "google/gemini-2.5-flash:free";
+    // Por defecto usamos el router free de OpenRouter: elige automáticamente un
+    // modelo gratis disponible que soporte structured output (JSON). Evitamos
+    // fijar un :free concreto porque se retiran constantemente (404).
+    const model = input.model ?? "openrouter/free";
     const body: Record<string, unknown> = {
       model,
       messages: [
