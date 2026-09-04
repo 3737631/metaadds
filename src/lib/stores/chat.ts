@@ -316,7 +316,8 @@ function stylePropsToSetStyle(o: unknown): { selector: string } | null {
 function toChatOp(o: unknown): ChatOp | null {
   if (!o || typeof o !== "object") return null;
   const c = o as Record<string, unknown>;
-  const op0 = typeof c.op === "string" ? c.op : typeof c.action === "string" ? c.action : typeof c.type === "string" ? c.type : "";
+  // Tolerar campos en español: tipo/accion/estilo/valor.
+  const op0 = typeof c.op === "string" ? c.op : typeof c.action === "string" ? c.action : typeof c.type === "string" ? c.type : typeof c.tipo === "string" ? c.tipo : typeof c.accion === "string" ? c.accion : "";
   let op = op0 ? normOp(op0) : "";
   if (op) {
     // injectCss no necesita selector: se aplica como <style> global.
@@ -351,8 +352,9 @@ function toChatOp(o: unknown): ChatOp | null {
   let selector: unknown = c.selector;
   if (typeof selector !== "string") selector = c.sel;
   if (typeof selector !== "string" || !selector.trim()) return null;
+  const prop = typeof c.prop === "string" ? c.prop : typeof c.estilo === "string" ? c.estilo : "";
   let value: unknown = c.value;
-  if (typeof value !== "string") value = c.text;
+  if (typeof value !== "string") value = typeof c.valor === "string" ? c.valor : c.text;
   if (typeof value !== "string" && typeof value !== "number") value = String(value ?? "");
   switch (op) {
     case "replaceText":
@@ -360,11 +362,13 @@ function toChatOp(o: unknown): ChatOp | null {
     case "replaceInner":
       return { op: "replaceInner", selector, html: String(typeof c.html === "string" ? c.html : value) };
     case "setStyle":
-      return typeof c.prop === "string" ? { op: "setStyle", selector, prop: c.prop, value: String(value) } : null;
+      return prop ? { op: "setStyle", selector, prop, value: String(value) } : null;
     case "setImage":
       return { op: "setImage", selector, src: String(value) };
     case "setAttr":
-      return typeof c.attr === "string" ? { op: "setAttr", selector, attr: c.attr, value: String(value) } : null;
+      return (typeof c.attr === "string" ? c.attr : prop)
+        ? { op: "setAttr", selector, attr: (typeof c.attr === "string" ? c.attr : prop) as string, value: String(value) }
+        : null;
     case "hide":
       return { op: "hide", selector };
     case "remove":
