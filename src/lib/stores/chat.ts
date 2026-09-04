@@ -16,6 +16,8 @@ export type ChatOp =
 export interface ChatEditResult {
   reply: string;
   ops: ChatOp[];
+  provider?: string;
+  model?: string;
 }
 
 function repairJson(raw: string): unknown | null {
@@ -128,6 +130,8 @@ export async function chatEditStore(opts: {
   return {
     reply: reply || "He aplicado tus cambios.",
     ops,
+    provider: result.provider,
+    model: result.model,
   };
 }
 
