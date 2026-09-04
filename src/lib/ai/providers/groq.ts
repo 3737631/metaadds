@@ -1,8 +1,19 @@
 import type { AIProvider, AIProviderInput, AIProviderResult } from "./types";
 
-export class OpenRouterProvider implements AIProvider {
-  readonly id = "openrouter";
-  readonly name = "OpenRouter";
+/**
+ * Proveedor de Groq (https://groq.com). Ofrece modelos Llama de alta velocidad
+ * con un nivel gratuito muy generoso. La clave se obtiene en
+ * -> https://console.groq.com/keys
+ *
+ * Modelo por defecto: openai/gpt-oss-20b (gratuito, muy capaz, devuelve JSON
+ * fiable con response_format json_object).
+ * Nota: los modelos GPT-OSS son "reasoning": consumen tokens internos antes de
+ * la respuesta final. Por eso se garantiza un presupuesto mínimo para que el
+ * razonamiento no se coma toda la salida dejando content vacío.
+ */
+export class GroqProvider implements AIProvider {
+  readonly id = "groq";
+  readonly name = "Groq";
 
   private apiKey: string;
 
@@ -11,9 +22,10 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   async generate(input: AIProviderInput): Promise<AIProviderResult> {
-    // Por defecto usamos un modelo gratuito (:free) para no gastar los créditos
-    // de la cuenta. Solo se consume saldo si el llamador pide un modelo de pago.
-    const model = input.model ?? "google/gemini-2.5-flash:free";
+    const model = input.model ?? "openai/gpt-oss-20b";
+    // Margen extra frente a otros proveedores: el razonamiento consume tokens
+    // antes del JSON, así que nunca vamos por debajo de 3200.
+    const maxTokens = Math.max(input.maxTokens ?? 1600, 3200);
     const body: Record<string, unknown> = {
       model,
       messages: [
@@ -21,22 +33,18 @@ export class OpenRouterProvider implements AIProvider {
         { role: "user", content: input.userPrompt },
       ],
       temperature: input.temperature ?? 0.7,
-      // Margen para modelos "thinking" (gemini-2.5, razoning): nunca por
-      // debajo de 3200 tokens para que la respuesta final no se corte.
-      max_tokens: Math.max(input.maxTokens ?? 1600, 3200),
+      max_tokens: maxTokens,
     };
 
     if (input.responseFormat === "json") {
       body.response_format = { type: "json_object" };
     }
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://meta-winners.vercel.app",
-        "X-Title": "Meta Winners AI",
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(60_000),
@@ -44,20 +52,18 @@ export class OpenRouterProvider implements AIProvider {
 
     if (!res.ok) {
       const err = await res.text().catch(() => "");
-      throw new Error(`OpenRouter ${res.status}: ${err.slice(0, 200)}`);
+      throw new Error(`Groq ${res.status}: ${err.slice(0, 200)}`);
     }
 
     const data = await res.json();
     const choice = data.choices?.[0];
     const content = (choice?.message?.content ?? "").trim();
-    // Algunos modelos reasoning dejan el texto final en `reasoning`/
-    // `reasoning_content` si se corta el presupuesto. Usamos cualquiera.
-    const reasoning = String(
-      choice?.message?.reasoning ?? choice?.message?.reasoning_content ?? ""
-    ).trim();
+    // En los modelos reasoning el texto final puede viajar en `content` o, al
+    // cortarse por presupuesto, quedar en `reasoning`. Usamos cualquiera.
+    const reasoning = (choice?.message?.reasoning ?? "").trim();
     const out = content || reasoning;
     if (!out) {
-      throw new Error("OpenRouter: respuesta vacía");
+      throw new Error("Groq: respuesta vacía");
     }
 
     return {

@@ -2,16 +2,19 @@ import type { AIProvider, AIProviderInput, AIProviderResult } from "./types";
 import { OpenRouterProvider } from "./openrouter";
 import { OpenAIProvider } from "./openai";
 import { GeminiProvider } from "./gemini";
+import { GroqProvider } from "./groq";
 
 export class AIService {
   private providers: AIProvider[] = [];
 
   constructor() {
     const gemKey = process.env.GEMINI_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
     const orKey = process.env.OPENROUTER_API_KEY;
     const oaiKey = process.env.OPENAI_API_KEY;
-    // Gemini primero: su nivel gratuito permite usar la IA sin tarjeta.
+    // Gemini y Groq primero: sus niveles gratuitos permiten usar IA sin tarjeta.
     if (gemKey) this.providers.push(new GeminiProvider(gemKey));
+    if (groqKey) this.providers.push(new GroqProvider(groqKey));
     if (orKey) this.providers.push(new OpenRouterProvider(orKey));
     if (oaiKey) this.providers.push(new OpenAIProvider(oaiKey));
   }
@@ -27,12 +30,12 @@ export class AIService {
   async generate(input: AIProviderInput): Promise<AIProviderResult> {
     if (this.providers.length === 0) {
       throw new Error(
-        "No hay proveedores de IA configurados. Añade GEMINI_API_KEY, OPENROUTER_API_KEY o OPENAI_API_KEY en .env.local"
+        "No hay proveedores de IA configurados. Añade GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY u OPENAI_API_KEY en .env.local"
       );
     }
 
     let lastError: Error | null = null;
-    const maxAttempts = Math.min(this.providers.length, 2);
+    const maxAttempts = Math.min(this.providers.length, 3);
 
     for (let i = 0; i < maxAttempts; i++) {
       const provider = this.providers[i];
