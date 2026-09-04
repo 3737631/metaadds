@@ -70,22 +70,53 @@ function repairJson(raw: string): unknown | null {
   let cleaned = raw.trim();
   const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) cleaned = fence[1].trim();
-  // Si es un array de ops (la IA a veces no envuelve en {reply,ops}), intenta parsearlo directamente.
-  if (cleaned.startsWith("[")) {
+
+  const tryParse = (s: string): unknown | null => {
     try {
-      return JSON.parse(cleanJsonLLM(cleaned));
+      return JSON.parse(cleanJsonLLM(s));
     } catch {
       return null;
     }
+  };
+
+  // Array de ops directo.
+  if (cleaned.startsWith("[")) {
+    const arr = tryParse(cleaned);
+    if (arr) return arr;
   }
-  const a = cleaned.indexOf("{");
-  const b = cleaned.lastIndexOf("}");
-  if (a >= 0 && b > a) cleaned = cleaned.slice(a, b + 1);
-  try {
-    return JSON.parse(cleanJsonLLM(cleaned));
-  } catch {
-    return null;
+
+  // Extrae el primer objeto JSON balanceando llaves (más robusto que
+  // lastIndexOf: si hay texto después o un cierre extra, igual lo encaja).
+  const start = cleaned.indexOf("{");
+  if (start >= 0) {
+    let depth = 0;
+    let inStr = false;
+    for (let i = start; i < cleaned.length; i++) {
+      const c = cleaned[i];
+      if (inStr) {
+        if (c === "\\") {
+          i += 1;
+          continue;
+        }
+        if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === "{") depth += 1;
+      else if (c === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          const obj = tryParse(cleaned.slice(start, i + 1));
+          if (obj) return obj;
+          break;
+        }
+      }
+    }
+    const obj = tryParse(cleaned.slice(start));
+    if (obj) return obj;
   }
+
+  return null;
 }
 
 function buildSystemPrompt(): string {
@@ -156,7 +187,10 @@ export async function chatEditStore(opts: {
   });
 
   const json = repairJson(result.content);
-  if (!json) return null;
+  if (!json) {
+    console.error("[/chat] JSON no parseable. provider:", result.provider, "model:", result.model, "raw:", result.content.slice(0, 2000));
+    return null;
+  }
 
   // Normaliza el sobre: {reply,ops[]}, ops[] directo, o un solo op {selector,...}.
   let reply = "";
