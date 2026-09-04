@@ -336,6 +336,10 @@ function toChatOp(o: unknown): ChatOp | null {
   if (rawCss.trim() && cssSel) {
     return { op: "injectCss", css: `${cssSel} { ${rawCss} }` };
   }
+  // Dialecto: {css: "h2 { color: ... }"} sin selector (bloque CSS completo).
+  if (rawCss.trim() && rawCss.includes("{")) {
+    return { op: "injectCss", css: rawCss.trim() };
+  }
   // Si no hay op/action explícito, deduce por heurística según campos presentes.
   if (!op) {
     if (c.style && typeof c.style === "object" && !Array.isArray(c.style)) op = "setStyle";
