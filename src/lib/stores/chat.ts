@@ -6,6 +6,7 @@ import { getAIService } from "@/lib/ai/providers/ai-service";
  */
 export type ChatOp =
   | { op: "replaceText"; selector: string; text: string }
+  | { op: "replaceByText"; text: string; newText: string }
   | { op: "replaceInner"; selector: string; html: string }
   | { op: "setStyle"; selector: string; prop: string; value: string }
   | { op: "setImage"; selector: string; src: string }
@@ -129,6 +130,7 @@ Devuelve SOLO JSON válido con la siguiente forma EXACTA:
   "reply": "breve mensaje en español explicando qué vas a cambiar (máx 2 frases), sin markdown",
   "ops": [
     { "op": "replaceText", "selector": "CSS selector único", "text": "nuevo texto" },
+    { "op": "replaceByText", "text": "texto actual EXACTO visible", "newText": "nuevo texto" },
     { "op": "setStyle", "selector": "CSS selector", "prop": "color", "value": "#e11d48" },
     { "op": "setImage", "selector": "CSS selector img", "src": "https://url.nueva/imagen.jpg" },
     { "op": "setAttr", "selector": "CSS selector", "attr": "href", "value": "https://..." },
@@ -147,12 +149,14 @@ REGLAS:
 - No inventes selectores que no existan: si no puedes decidir, usa el más probable y añade en "reply" que revises la parte concreta.
 - Mantén el promedio. No cambies nada que la instrucción no pida.
 - El texto base de la web va en español salvo que la instrucción diga otra cosa.
-- TRADUCCIÓN DE IDIOMA: si el usuario pide 'pon la web en inglés' (u otro idioma), NO te limites a responder: emite ops 'replaceText' (y 'setAttr' para los lang si procede) que traduzcan al idioma pedido TODOS los textos visibles que encuentres en el HTML (titulares h1/h2/h3, párrafos, botones, enlaces de menú, p.ej. 'ACERCA DE NOSOTROS'→'ABOUT US', 'INICIO'→'HOME', 'Comprar'→'Buy Now'). Traduce cada texto que aparezca, uno por uno, con su selector real. Si hay muchos, cubre al menos los titulares principales, menú, botones y párrafos más visibles.`;
+- TRADUCCIÓN DE IDIOMA: si el usuario pide 'pon la web en inglés' (u otro idioma), emite UNA op 'replaceByText' por cada TEXTO VISIBLE listado en la sección 'TEXTOS VISIBLES DE LA WEB' del prompt de usuario, con "text" = el texto español exacto y "newText" = su traducción al idioma pedido (p.ej. 'ACERCA DE NOSOTROS'→'ABOUT US', '¡LINDO SOFA!'→'NICE SOFA!', 'INICIO'→'HOME', 'Comprar ahora'→'Buy now'). Traduce TODOS los textos visibles de la lista, uno por uno, sin saltarte ninguno. No necesitas selector CSS: usa replaceByText con el texto exacto. NO te limites a responder ni a poner solo el atributo lang; traduce el contenido visible.`;
 }
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
   const bodyOnly = extractBody(html);
   const safe = bodyOnly.slice(0, 12000);
+  const visible = extractVisibleTexts(bodyOnly);
+  const list = visible.map((t, i) => `${i + 1}. ${t}`).join("\n");
   return `TENDA / DOMINIO: ${domain}
 
 INSTRUCCIÓN DEL USUARIO: ${request}
@@ -160,7 +164,56 @@ INSTRUCCIÓN DEL USUARIO: ${request}
 HTML capturado de la tienda (recortado; usa selectores reales que existan aquí):
 ${safe}
 
+TEXTOS VISIBLES DE LA WEB (usa estos EXACTOS con la op replaceByText cuando haya que traducir o renombrar texto):
+${list || "(ninguno extraído)"}
+
 Devuelve el JSON.`;
+}
+
+/**
+ * Extrae los textos visibles más relevantes de la web (titulares, botones,
+ * enlaces, párrafos) para que la IA los traduzca/renombre de forma fiable.
+ */
+function extractVisibleTexts(body: string): string[] {
+  const out: string[] = [];
+  const regex = /<(\w+)\b[^>]*>([^<]{2,120})<\/(\1)>/gi;
+  let m: RegExpExecArray | null;
+  const tags = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "span", "li", "strong", "em"]);
+  const seen = new Set<string>();
+  while ((m = regex.exec(body)) !== null && out.length < 45) {
+    const tag = m[1].toLowerCase();
+    if (!tags.has(tag)) continue;
+    let txt = m[2].replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&aacute;|&eacute;|&iacute;|&oacute;|&uacute;|&ntilde;/gi, "").trim();
+    if (!txt) continue;
+    const allLower = txt.replace(/\s+/g, " ").trim();
+    if (allLower.length < 2) continue;
+    if (/^[\s\W_]+$/.test(txt)) continue;
+    if (seen.has(txt)) continue;
+    seen.add(txt);
+    out.push(txt);
+  }
+  return out;
+}
+
+/** Detecta si el usuario pide cambiar el idioma de la web (necesita más tokens y ops replaceByText). */
+function isLanguageChange(request: string): boolean {
+  const r = request.toLowerCase();
+  return (
+    /\bingl[ée]s\b/.test(r) ||
+    /\benglish\b/.test(r) ||
+    /\bfranc[ée]s\b/.test(r) ||
+    /\bfrench\b/.test(r) ||
+    /\bportugu[ée]s\b/.test(r) ||
+    /\bialem[aá]n\b/.test(r) ||
+    /\bitaliano\b/.test(r) ||
+    /\bidioma\b/.test(r) ||
+    /\blenguaje\b/.test(r) ||
+    /traduc/.test(r) ||
+    /\ben espa[ñn]ol\b/.test(r) ||
+    /\bin spanish\b/.test(r) ||
+    /\bin english\b/.test(r) ||
+    /idioma de la web|idioma de la p[aá]gina|cambiar el idioma/.test(r)
+  );
 }
 
 /** Extrae el <body> (y algo del <head> para clases globales) sin scripts pesados. */
@@ -361,6 +414,12 @@ function toChatOp(o: unknown): ChatOp | null {
       return css ? { op: "injectCss", css: css as string } : null;
     }
   }
+  // replaceByText: sustituye por coincidencia de texto visible (sin selector CSS).
+  if (op === "replaceByText" || op === "replacebytext" || op === "replacetextbymatch" || op === "translate") {
+    const src = typeof c.text === "string" ? c.text.trim() : null;
+    const dst = src ? (typeof c.newText === "string" ? c.newText : typeof c.value === "string" ? c.value : typeof c.textoNuevo === "string" ? c.textoNuevo : null) : null;
+    return src && dst ? { op: "replaceByText", text: src, newText: dst } : null;
+  }
   // Obtiene el CSS en forma de bloque (string) tolerando claves comunes.
   const rawCss = typeof c.css === "string" ? c.css
     : typeof c.css_code === "string" ? c.css_code
@@ -525,7 +584,7 @@ export async function chatEditStoreStream(
       userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
       responseFormat: "json",
       temperature: 0.4,
-      maxTokens: 2048,
+      maxTokens: isLanguageChange(opts.request) ? 10000 : 2048,
     }, (delta) => {
       buf += delta;
 

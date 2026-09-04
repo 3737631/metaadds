@@ -156,6 +156,18 @@ const OPS_RECEIVER = `
     }
     var els = Array.prototype.slice.call(document.querySelectorAll(op.selector || ''));
     var val = op.value !== undefined ? op.value : (op.text !== undefined ? op.text : (op.src !== undefined ? op.src : (op.html !== undefined ? op.html : '')));
+    if (op.op === 'replaceByText') {
+      var target = null;
+      var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,div');
+      for (var ti = 0; ti < allEls.length; ti++) {
+        var cand = allEls[ti];
+        if (cand.children.length === 0 && cand.textContent && cand.textContent.trim() === (op.text || '')) {
+          target = cand; break;
+        }
+      }
+      if (target) { target.textContent = op.newText; return { ok: true, selector: op.text }; }
+      return { ok: false, selector: op.text };
+    }
     if (!els.length) {
       return { ok: false, selector: op.selector };
     }
