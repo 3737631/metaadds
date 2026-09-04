@@ -57,10 +57,12 @@ export async function POST(req: Request) {
       let provider: string | undefined;
       let model: string | undefined;
       try {
-        const meta = await chatEditStoreStream(
+        const streamTask = chatEditStoreStream(
           { html: snapshot.html, domain: snapshot.domain, request },
           { onOp: (op) => sendOps([op]), onReply: sendReply }
         );
+        const timeoutTask = new Promise<null>((resolve) => setTimeout(() => resolve(null), 90_000));
+        const meta = await Promise.race([streamTask, timeoutTask]);
         provider = meta?.provider;
         model = meta?.model;
       } catch (err) {
