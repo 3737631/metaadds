@@ -67,6 +67,8 @@ export async function POST(req: Request) {
         console.error("[/api/stores/chat]", err);
       }
 
+      console.error(`[/api/stores/chat] url=${url} request=${request.slice(0,40)} delivered=${delivered} provider=${provider} model=${model}`);
+
       if (delivered === 0) {
         send({
           type: "error",
