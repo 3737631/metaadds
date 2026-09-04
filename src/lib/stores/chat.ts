@@ -625,8 +625,8 @@ export async function chatEditStoreStream(
       }
     }
 
-    if (extractCompleteOps(buf).length === 0) {
-      console.error("[chatStream][DEBUG] no-ops raw buf:", buf.slice(0, 4000));
+    if (isLanguageChange(opts.request)) {
+      console.error("[chatStream][DEBUG] lang-change raw buf:", buf.slice(0, 6000));
     }
 
     return { provider: result.provider, model: result.model };
