@@ -146,46 +146,68 @@ const EDITOR_SCRIPT = `
 const OPS_RECEIVER = `
 (function () {
   var apply = function (op) {
-    if (op.op === 'injectCss' && op.css) {
-      try {
+    try {
+      if (op.op === 'injectCss' && op.css) {
         var st = document.createElement('style');
         st.textContent = op.css;
         (document.head || document.documentElement).appendChild(st);
         return { ok: true, selector: 'CSS' };
-      } catch (e) { return { ok: false, selector: 'CSS' }; }
-    }
-    var els = Array.prototype.slice.call(document.querySelectorAll(op.selector || ''));
-    var val = op.value !== undefined ? op.value : (op.text !== undefined ? op.text : (op.src !== undefined ? op.src : (op.html !== undefined ? op.html : '')));
-    if (op.op === 'replaceByText') {
-      var target = null;
-      var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,div');
-      for (var ti = 0; ti < allEls.length; ti++) {
-        var cand = allEls[ti];
-        if (cand.children.length === 0 && cand.textContent && cand.textContent.trim() === (op.text || '')) {
-          target = cand; break;
+      }
+      var sel = typeof op.selector === 'string' && op.selector.trim() ? op.selector.trim() : null;
+      var val = op.value !== undefined ? op.value : (op.text !== undefined ? op.text : (op.src !== undefined ? op.src : (op.html !== undefined ? op.html : '')));
+      if (op.op === 'replaceByText') {
+        var want = String(op.text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!want) return { ok: false, selector: op.text };
+        var norm = function (s) { return String(s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(); };
+        var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,div');
+        var best = null, bestDepth = -1;
+        for (var ti = 0; ti < allEls.length; ti++) {
+          var cand = allEls[ti];
+          if (norm(cand.textContent) !== want) continue;
+          if (cand.tagName === 'SCRIPT' || cand.tagName === 'STYLE' || cand.tagName === 'NOSCRIPT') continue;
+          var d = 0, n = cand;
+          while (n.parentElement) { d++; n = n.parentElement; }
+          if (d > bestDepth) { best = cand; bestDepth = d; }
         }
+        if (best) { best.textContent = op.newText; return { ok: true, selector: op.text }; }
+        // Fallback: contenedor pequeño cuyo texto normalizado CONTIENE el buscado
+        // (p. ej. párrafo con puntuación o espacios distinta a la extraída).
+        for (var ci = 0; ci < allEls.length; ci++) {
+          var cc = allEls[ci];
+          if (cc.children.length > 3) continue;
+          var cct = norm(cc.textContent);
+          if (cct.indexOf(want) !== -1 && cct.length <= want.length * 2 + 12) {
+            cc.textContent = op.newText;
+            return { ok: true, selector: op.text };
+          }
+        }
+        return { ok: false, selector: op.text };
       }
-      if (target) { target.textContent = op.newText; return { ok: true, selector: op.text }; }
-      return { ok: false, selector: op.text };
-    }
-    if (!els.length) {
-      return { ok: false, selector: op.selector };
-    }
-    els.forEach(function (el) {
-      switch (op.op) {
-        case 'replaceText': el.textContent = val; break;
-        case 'replaceInner': el.innerHTML = val; break;
-        case 'setStyle': if (el.style) { el.style[op.prop] = val; } break;
-        case 'setImage':
-          if (el.tagName === 'IMG') el.setAttribute('src', val);
-          else if (el.style) el.style.backgroundImage = 'url(' + val + ')';
-          break;
-        case 'setAttr': el.setAttribute(op.attr || op.prop || 'href', val); break;
-        case 'hide': if (el.style) el.style.display = 'none'; break;
-        case 'remove': el.remove(); break;
+      if (!sel) return { ok: false, selector: null };
+      var els = [];
+      try { els = Array.prototype.slice.call(document.querySelectorAll(sel)); }
+      catch (e) { return { ok: false, selector: sel, err: String(e) }; }
+      if (!els.length) {
+        return { ok: false, selector: sel };
       }
-    });
-    return { ok: true, selector: op.selector };
+      els.forEach(function (el) {
+        switch (op.op) {
+          case 'replaceText': el.textContent = val; break;
+          case 'replaceInner': el.innerHTML = val; break;
+          case 'setStyle': if (el.style) { el.style[op.prop] = val; } break;
+          case 'setImage':
+            if (el.tagName === 'IMG') el.setAttribute('src', val);
+            else if (el.style) el.style.backgroundImage = 'url(' + val + ')';
+            break;
+          case 'setAttr': el.setAttribute(op.attr || op.prop || 'href', val); break;
+          case 'hide': if (el.style) el.style.display = 'none'; break;
+          case 'remove': el.remove(); break;
+        }
+      });
+      return { ok: true, selector: sel };
+    } catch (e) {
+      return { ok: false, selector: op && op.selector, err: String(e) };
+    }
   };
   window.addEventListener('message', function (e) {
     var d = e.data;
