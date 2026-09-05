@@ -10,10 +10,12 @@ function sse(json: unknown): string {
 export async function POST(req: Request) {
   let url = "";
   let request = "";
+  let html = "";
   try {
     const body = await req.json();
     url = typeof body?.url === "string" ? body.url.trim() : "";
     request = typeof body?.request === "string" ? body.request.trim() : "";
+    html = typeof body?.html === "string" ? body.html.trim() : "";
   } catch {
     /* body inválido */
   }
@@ -33,17 +35,32 @@ export async function POST(req: Request) {
     async start(controller) {
       const send = (json: unknown) => controller.enqueue(encoder.encode(sse(json)));
 
-      let snapshot;
-      try {
-        snapshot = await buildSnapshot(url);
-      } catch {
-        snapshot = null;
-      }
-      if (!snapshot) {
-        send({ type: "error", code: "SNAPSHOT_ERROR", message: "No pudimos capturar la web de la tienda." });
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
-        return;
+      // El frontend envía el html del snapshot que YA está renderizado en el iframe
+      // para que los ops del bot referencia exactamente los textos visibles en él.
+      // Si no llega (API directa), capturamos un snapshot fresco como antes.
+      let snapshotHtml: string;
+      let domain: string;
+      if (html && html.length > 1000) {
+        snapshotHtml = html;
+        domain = (() => {
+          try { return new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname; }
+          catch { return url; }
+        })();
+      } else {
+        let snapshot;
+        try {
+          snapshot = await buildSnapshot(url);
+        } catch {
+          snapshot = null;
+        }
+        if (!snapshot) {
+          send({ type: "error", code: "SNAPSHOT_ERROR", message: "No pudimos capturar la web de la tienda." });
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+          return;
+        }
+        snapshotHtml = snapshot.html;
+        domain = snapshot.domain;
       }
 
       let delivered = 0;
@@ -58,7 +75,7 @@ export async function POST(req: Request) {
       let model: string | undefined;
       try {
         const streamTask = chatEditStoreStream(
-          { html: snapshot.html, domain: snapshot.domain, request },
+          { html: snapshotHtml, domain, request },
           { onOp: (op) => sendOps([op]), onReply: sendReply }
         );
         const timeoutTask = new Promise<null>((resolve) => setTimeout(() => resolve(null), 150_000));

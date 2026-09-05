@@ -165,7 +165,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       const res = await fetch("/api/stores/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: selected.url, request: req }),
+        body: JSON.stringify({ url: selected.url, request: req, html: snapshot?.html ?? "" }),
       });
 
       if (!res.ok || !res.body) {
