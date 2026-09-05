@@ -128,7 +128,6 @@ Debes convertir la instrucción en una lista de OPERACIONES DOM concretas que tr
 
 Devuelve SOLO JSON válido con la siguiente forma EXACTA:
 {
-  "reply": "breve mensaje en español explicando qué vas a cambiar (máx 2 frases), sin markdown",
   "ops": [
     { "op": "replaceText", "selector": "CSS selector único", "text": "nuevo texto" },
     { "op": "replaceByText", "text": "texto actual EXACTO visible", "newText": "nuevo texto" },
@@ -139,8 +138,11 @@ Devuelve SOLO JSON válido con la siguiente forma EXACTA:
     { "op": "hide", "selector": "CSS selector" },
     { "op": "remove", "selector": "CSS selector" },
     { "op": "injectCss", "css": "reglas CSS globales que transforman TODA la web" }
-  ]
+  ],
+  "reply": "breve mensaje en español explicando qué vas a cambiar (máx 2 frases), sin markdown"
 }
+
+REGLA DE ORDEN (IMPORTANTÍSIMA): escribe PRIMERO la clave "ops" con TODAS las operaciones, y MUY AL FINAL la clave "reply". Tu respuesta debe empezar directamente con {"ops":[  — no escribas ninguna palabra, anotación ni comentario antes ni entre medias. Si el JSON es largo, da igual: lo importante es que las operaciones salgan primero.
 
 REGLAS:
 - Los selectores deben apuntar a elementos EXISTENTES en el HTML que se te envía (usa texto visible entre comillas si ayuda, p. ej. 'a:has-text(...)' NO existe; usa selectores CSS reales: h1, .clase, #id, [data-*], o el Nº de índice). Prefiere selectores robustos y únicos: etiqueta (h1), .clase conocida, o [título de sección].
@@ -669,8 +671,8 @@ export async function chatEditStoreStream(
   const service = getAIService();
   if (!service.available) return null;
 
-  const maxAttempts = Math.min(service.providerCount, 3);
-  const ATTEMPT_TIMEOUT = 65_000;
+  const maxAttempts = Math.min(service.providerCount, 6);
+  const ATTEMPT_TIMEOUT = 30_000;
 
   // Reintentamos proveedor a proveedor hasta conseguir al menos una operación
   // real: si un modelo responde con 0 ops o se cuelga, descartamos y probamos

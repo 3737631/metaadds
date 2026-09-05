@@ -12,10 +12,15 @@ export class AIService {
     const groqKey = process.env.GROQ_API_KEY;
     const orKey = process.env.OPENROUTER_API_KEY;
     const oaiKey = process.env.OPENAI_API_KEY;
-    // Gemini y Groq primero: sus niveles gratuitos permiten usar IA sin tarjeta.
-    if (gemKey) this.providers.push(new GeminiProvider(gemKey));
+    // OpenRouter primero (con 3 modelos gratuitos distintos para máxima fiabilidad):
+    // streak estable y rápido para traducir la web al instante.
+    if (orKey) {
+      this.providers.push(new OpenRouterProvider(orKey));
+      this.providers.push(new OpenRouterProvider(orKey, { model: "minimax/minimax-m2.7:free" }));
+      this.providers.push(new OpenRouterProvider(orKey, { model: "cohere/north-mini-code:free" }));
+    }
     if (groqKey) this.providers.push(new GroqProvider(groqKey));
-    if (orKey) this.providers.push(new OpenRouterProvider(orKey));
+    if (gemKey) this.providers.push(new GeminiProvider(gemKey));
     if (oaiKey) this.providers.push(new OpenAIProvider(oaiKey));
   }
 
