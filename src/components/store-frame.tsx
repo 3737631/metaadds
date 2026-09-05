@@ -160,16 +160,21 @@ const OPS_RECEIVER = `
         if (!want) return { ok: false, selector: op.text };
         var norm = function (s) { return String(s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(); };
         var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,div');
-        var best = null, bestDepth = -1;
+        // Reemplaza TODAS las ocurrencias del texto (un mismo rótulo suele aparecer
+        // en header, menú móvil, footer...). Para no pisar contenedores anidados,
+        // se salta un elemento cuyo padre también coincide (su padre ya se reemplaza).
+        var candidates = [];
         for (var ti = 0; ti < allEls.length; ti++) {
           var cand = allEls[ti];
-          if (norm(cand.textContent) !== want) continue;
           if (cand.tagName === 'SCRIPT' || cand.tagName === 'STYLE' || cand.tagName === 'NOSCRIPT') continue;
-          var d = 0, n = cand;
-          while (n.parentElement) { d++; n = n.parentElement; }
-          if (d > bestDepth) { best = cand; bestDepth = d; }
+          if (norm(cand.textContent) !== want) continue;
+          if (cand.parentElement && norm(cand.parentElement.textContent) === want) continue;
+          candidates.push(cand);
         }
-        if (best) { best.textContent = op.newText; return { ok: true, selector: op.text }; }
+        if (candidates.length) {
+          for (var ci2 = 0; ci2 < candidates.length; ci2++) candidates[ci2].textContent = op.newText;
+          return { ok: true, selector: op.text };
+        }
         // Fallback: contenedor pequeño cuyo texto normalizado CONTIENE el buscado
         // (p. ej. párrafo con puntuación o espacios distinta a la extraída).
         for (var ci = 0; ci < allEls.length; ci++) {

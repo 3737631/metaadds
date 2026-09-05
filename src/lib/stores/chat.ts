@@ -155,7 +155,7 @@ REGLAS:
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
   const bodyOnly = extractBody(html);
-  const safe = bodyOnly.slice(0, 12000);
+  const safe = bodyOnly.slice(0, 30000);
   const visible = extractVisibleTexts(bodyOnly);
   const list = visible.map((t, i) => `${i + 1}. ${t}`).join("\n");
   return `TENDA / DOMINIO: ${domain}
@@ -181,7 +181,7 @@ function extractVisibleTexts(body: string): string[] {
   let m: RegExpExecArray | null;
   const tags = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "span", "li", "strong", "em"]);
   const seen = new Set<string>();
-  while ((m = regex.exec(body)) !== null && out.length < 45) {
+  while ((m = regex.exec(body)) !== null && out.length < 100) {
     const tag = m[1].toLowerCase();
     if (!tags.has(tag)) continue;
     let txt = m[2].replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&aacute;|&eacute;|&iacute;|&oacute;|&uacute;|&ntilde;/gi, "").trim();
@@ -691,7 +691,7 @@ export async function chatEditStoreStream(
             userPrompt: buildUserPrompt(opts.html, opts.domain, opts.request),
             responseFormat: "json",
             temperature: 0.4,
-            maxTokens: isLanguageChange(opts.request) ? 5000 : 2048,
+            maxTokens: isLanguageChange(opts.request) ? 6000 : 2048,
           },
           (delta) => {
             buf += delta;
