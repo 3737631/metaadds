@@ -159,7 +159,7 @@ const OPS_RECEIVER = `
         var want = String(op.text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
         if (!want) return { ok: false, selector: op.text };
         var norm = function (s) { return String(s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(); };
-        var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,div');
+        var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,label,legend,figcaption,div');
         // Reemplaza TODAS las ocurrencias del texto (un mismo rótulo suele aparecer
         // en header, menú móvil, footer...). Para no pisar contenedores anidados,
         // se salta un elemento cuyo padre también coincide (su padre ya se reemplaza).

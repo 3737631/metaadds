@@ -179,8 +179,8 @@ Devuelve el JSON.`;
  */
 function extractVisibleTexts(body: string): string[] {
   const regex = /<(\w+)\b[^>]*>([^<]{2,120})<\/(\1)>/gi;
-  const tags = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "span", "li", "strong", "em"]);
-  const priority = new Set(["h1", "h2", "h3", "h4", "button"]);
+  const tags = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "span", "li", "strong", "em", "label", "legend", "figcaption"]);
+  const priority = new Set(["h1", "h2", "h3", "h4", "button", "label", "legend"]);
   const priorityOut: string[] = [];
   const restOut: string[] = [];
   const seen = new Set<string>();
@@ -229,6 +229,94 @@ function normSp(t: string): string {
 
 /** Máximo de pasadas de cobertura tras una traducción de idioma (para completar la web). */
 const LANGUAGE_COVER_PASSES = 3;
+
+/**
+ * Glosario determinista ES→EN para rótulos UI genéricos de tiendas (navegación,
+ * newsletter, accesibilidad, footer) que los modelos suelen omitir y que
+ * aparecen repetidos en miles de temas. Solo se aplica a textos pendientes que
+ * EXISTEN de verdad en la web capturada y que no tradujo la IA.
+ */
+const GLOSSARY_ES_EN: Record<string, string> = {
+  "inicio": "Home",
+  "contacto": "Contact",
+  "contacto y ayuda": "Contact and help",
+  "atención al cliente": "Customer service",
+  "servicio al cliente": "Customer service",
+  "inicia sesión": "Log in",
+  "iniciar sesión": "Log in",
+  "cerrar sesión": "Log out",
+  "cerrar sesión (esc)": "Log out (esc)",
+  "crear una cuenta": "Create an account",
+  "mi cuenta": "My account",
+  "cuenta": "Account",
+  "registrarse": "Sign up",
+  "buscar": "Search",
+  "búsqueda": "Search",
+  "carrito": "Cart",
+  "cesta": "Cart",
+  "carrito de compra": "Shopping cart",
+  "menú": "Menu",
+  "menú principal": "Main menu",
+  "menú inferior": "Footer menu",
+  "novedades": "New arrivals",
+  "ofertas": "Offers",
+  "promociones": "Promotions",
+  "descuentos": "Discounts",
+  "envío": "Shipping",
+  "envíos y devoluciones": "Shipping & returns",
+  "devoluciones": "Returns",
+  "política de privacidad": "Privacy policy",
+  "política de devolución": "Return policy",
+  "términos y condiciones": "Terms and conditions",
+  "condiciones de uso": "Terms of use",
+  "sobre nosotros": "About us",
+  "quienes somos": "About us",
+  "fabricado en": "Made in",
+  "añadir al carrito": "Add to cart",
+  "añadir": "Add",
+  "enviar": "Send",
+  "entrar": "Enter",
+  "volver": "Back",
+  "volver a la tienda": "Back to the store",
+  "continuar comprando": "Continue shopping",
+  "seguir comprando": "Continue shopping",
+  "finalizar compra": "Checkout",
+  "tramitar pedido": "Checkout",
+  "pagar": "Pay",
+  "agotado": "Sold out",
+  "listo": "Ready",
+  "listo para enviar": "Ready to ship",
+  "guardar": "Save",
+  "recibir ofertas": "Receive offers",
+  "recibir novedades": "Receive news",
+  "suscríbete a nuestra lista de deseos": "Subscribe to our wishlist",
+  "suscríbete a nuestra lista de correo": "Subscribe to our mailing list",
+  "suscribir": "Subscribe",
+  "suscríbete": "Subscribe",
+  "mantente en contacto": "Stay in touch",
+  "síguenos": "Follow us",
+  "síguenos en": "Follow us on",
+  "menú y temas": "Menu and topics",
+  "palabras clave": "Keywords",
+  "título del sitio": "Site title",
+  "descripción del sitio": "Site description",
+  "vende con nosotros": "Sell with us",
+  "sobre nuestra tienda": "About our store",
+  "enlaces rápidos": "Quick links",
+  "información de la tienda": "Store information",
+  "certificaciones": "Certifications",
+  "pagar de forma segura": "Secure checkout",
+  "métodos de pago": "Payment methods",
+  "idioma": "Language",
+  "moneda": "Currency",
+  "elegir idioma": "Choose language",
+  "elegir moneda": "Choose currency",
+  "política de cookies": "Cookie policy",
+  "aceptar": "Accept",
+  "aceptar todas": "Accept all",
+  "rechazar": "Decline",
+  "personalizar": "Customize",
+};
 
 /** Detecta si el usuario pide cambiar el idioma de la web (necesita más tokens y ops replaceByText). */
 function isLanguageChange(request: string): boolean {
@@ -908,6 +996,24 @@ export async function chatEditStoreStream(
           break;
         }
         console.warn(`[chatStream] pasada de cobertura ${pass}: +${fbEmitted} ops (${delivered.length} total)`);
+        pend = pending();
+      }
+      // CIERRE DETERMINISTA: los textos pendientes que son rótulos UI genéricos
+      // (navegación, newsletter, a11y, footer) se traducen con un glosario fijo
+      // para que NO quede español visible aunque el modelo los omita.
+      if (pend.length > 0) {
+        let glosApplied = 0;
+        for (const pendTxt of pend) {
+          const en = GLOSSARY_ES_EN[normSp(pendTxt)];
+          if (!en) continue;
+          delivered.push({ op: "replaceByText", text: pendTxt, newText: en });
+          handlers.onOp({ op: "replaceByText", text: pendTxt, newText: en });
+          covered.add(normSp(pendTxt));
+          glosApplied++;
+        }
+        if (glosApplied > 0) {
+          console.warn(`[chatStream] glosario cerró ${glosApplied} textos pendientes (${delivered.length} ops total)`);
+        }
         pend = pending();
       }
       if (pend.length > 0) {
