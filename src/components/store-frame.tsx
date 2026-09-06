@@ -227,6 +227,28 @@ const OPS_RECEIVER = `
       parent.postMessage({ type: 'ops-applied', applied: applied, failed: failed }, '*');
     }
   });
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.type !== 'request-state') return;
+    // Limpia los artefactos inyectados para que la serialización sea reutilizable.
+    ['__meta_ops', '__meta_editor'].forEach(function (id) {
+      var s = document.getElementById(id);
+      if (s && s.parentNode) s.parentNode.removeChild(s);
+    });
+    var banner = document.querySelector('.ed-banner');
+    if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+    var tagged = document.querySelectorAll('[data-eid], [data-edit], [contenteditable], [__ED__]');
+    for (var ti = 0; ti < tagged.length; ti++) {
+      var el = tagged[ti];
+      el.removeAttribute('data-eid');
+      el.removeAttribute('data-edit');
+      el.removeAttribute('contenteditable');
+      el.removeAttribute('__ED__');
+    }
+    if (parent && parent !== window) {
+      parent.postMessage({ type: 'iframe-state', html: document.documentElement.outerHTML }, '*');
+    }
+  });
 })();
 `;
 
@@ -237,6 +259,8 @@ export default function StoreFrame({
   domain,
   editMode = false,
   opsRef,
+  stateRef,
+  onState,
 }: {
   html: string;
   title: string;
@@ -244,6 +268,8 @@ export default function StoreFrame({
   domain: string;
   editMode?: boolean;
   opsRef?: RefObject<((ops: ChatOp[]) => void) | null>;
+  stateRef?: RefObject<(() => void) | null>;
+  onState?: (html: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -271,6 +297,17 @@ export default function StoreFrame({
     };
   }, [opsRef]);
 
+  // Exponer al padre un disparador para pedir el estado del iframe (serializa el DOM ya modificado).
+  useEffect(() => {
+    if (!stateRef) return;
+    stateRef.current = () => {
+      iframeRef.current?.contentWindow?.postMessage({ type: "request-state" }, "*");
+    };
+    return () => {
+      if (stateRef) stateRef.current = null;
+    };
+  }, [stateRef]);
+
   // Recibir notificaciones de edición desde dentro del iframe.
   const onEdit = useCallback((eid: string, mode: string, value: string) => {
     // Podríamos registrar aquí el histórico; de momento no hacemos nada en el padre
@@ -284,10 +321,13 @@ export default function StoreFrame({
       if (d && d.type === "snapshot-edit") {
         onEdit(String(d.eid), String(d.mode), String(d.value));
       }
+      if (d && d.type === "iframe-state" && typeof d.html === "string" && onState) {
+        onState(d.html);
+      }
     }
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onEdit]);
+  }, [onEdit, onState]);
 
   const editableSrc = useMemo(() => {
     // Siempre inyectamos el receptor de operaciones del chatbot para poder aplicar
@@ -297,12 +337,12 @@ export default function StoreFrame({
     // Concatenación simple (no template literal) para obtener un `</script>` REAL que
     // cierre la etiqueta en el srcdoc; un `<\/script>` escapado dejaría el <script>
     // abierto y el parser se tragaría el resto del HTML.
-    const receiver = "<script>" + OPS_RECEIVER + "</script>";
+    const receiver = '<script id="__meta_ops">' + OPS_RECEIVER + "</script>";
     if (!editMode) {
       return html.slice(0, idx) + receiver + html.slice(idx);
     }
     // En modo edición añadimos además el editor click-to-edit.
-    const editor = "<script>" + EDITOR_SCRIPT + "</script>";
+    const editor = '<script id="__meta_editor">' + EDITOR_SCRIPT + "</script>";
     return html.slice(0, idx) + receiver + editor + html.slice(idx);
   }, [html, editMode]);
 

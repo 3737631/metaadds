@@ -58,12 +58,39 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [chatLoading, setChatLoading] = useState(false);
   const [appliedCount, setAppliedCount] = useState(0);
   const chatOpsRef = useRef<((ops: ChatOp[]) => void) | null>(null);
+  const chatStateRef = useRef<(() => void) | null>(null);
+  const [liveHtml, setLiveHtml] = useState<string | null>(null);
+  const [editingPending, setEditingPending] = useState(false);
+  const editTargetRef = useRef<boolean | null>(null);
   const [streamingReply, setStreamingReply] = useState<string | null>(null);
   const typewriterRef = useRef<number | null>(null);
 
   function flash(msg: string) {
     setNotif(msg);
     setTimeout(() => setNotif(null), 2500);
+  }
+
+  // Al entrar/salir de edición, primero pide al iframe serializar su DOM ya
+  // modificado (cambios del chat o click-to-edit) y recién entonces cambia de
+  // modo usando ese HTML — así los cambios no se pierden al recargar el iframe.
+  function commitEditing(next: boolean) {
+    editTargetRef.current = next;
+    setEditingPending(true);
+    chatStateRef.current?.();
+    window.setTimeout(() => {
+      if (editTargetRef.current === null) return;
+      setEditing(editTargetRef.current);
+      editTargetRef.current = null;
+      setEditingPending(false);
+    }, 800);
+  }
+
+  function onIframeState(html: string) {
+    if (editTargetRef.current === null) return;
+    setLiveHtml(html);
+    setEditing(editTargetRef.current);
+    editTargetRef.current = null;
+    setEditingPending(false);
   }
 
   async function doSearch() {
@@ -99,6 +126,9 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setChatMsgs([]);
     setChatInput("");
     setStreamingReply(null);
+    setLiveHtml(null);
+    setEditingPending(false);
+    editTargetRef.current = null;
     try {
       // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
       const [snapRes, reproRes] = await Promise.all([
@@ -167,7 +197,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       const res = await fetch("/api/stores/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: selected.url, request: req, html: snapshot?.html ?? "" }),
+        body: JSON.stringify({ url: selected.url, request: req, html: liveHtml ?? snapshot?.html ?? "" }),
       });
 
       if (!res.ok || !res.body) {
@@ -483,30 +513,34 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
           {!editing ? (
             <button
               type="button"
-              onClick={() => setEditing(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-base font-bold text-white shadow-lg shadow-accent/25 transition-transform active:scale-[0.98] hover:brightness-110"
+              onClick={() => commitEditing(true)}
+              disabled={editingPending}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-base font-bold text-white shadow-lg shadow-accent/25 transition-transform active:scale-[0.98] hover:brightness-110 disabled:opacity-60"
             >
-              <Pencil className="h-6 w-6" /> EDITAR
+              <Pencil className="h-6 w-6" /> {editingPending ? "Guardando cambios…" : "EDITAR"}
             </button>
           ) : (
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setEditing(false)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/50 bg-emerald-500/10 px-6 py-4 text-base font-bold text-emerald-400 hover:brightness-110"
+                onClick={() => commitEditing(false)}
+                disabled={editingPending}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/50 bg-emerald-500/10 px-6 py-4 text-base font-bold text-emerald-400 hover:brightness-110 disabled:opacity-60"
               >
-                <Check className="h-6 w-6" /> LISTO
+                <Check className="h-6 w-6" /> {editingPending ? "Guardando cambios…" : "LISTO"}
               </button>
             </div>
           )}
 
           <StoreFrame
-            html={snapshot.html}
+            html={liveHtml ?? snapshot.html}
             title={snapshot.title}
             shopify={snapshot.shopify}
             domain={snapshot.domain}
             editMode={editing}
             opsRef={chatOpsRef}
+            stateRef={chatStateRef}
+            onState={onIframeState}
           />
 
           {/* Chat: pide cambios y se aplican en vivo sobre la mini web */}
