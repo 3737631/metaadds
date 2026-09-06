@@ -12,10 +12,10 @@ export class AIService {
     const groqKey = process.env.GROQ_API_KEY;
     const orKey = process.env.OPENROUTER_API_KEY;
     const oaiKey = process.env.OPENAI_API_KEY;
-    // OpenRouter primero (con 3 modelos gratuitos distintos para máxima fiabilidad):
-    // streak estable y rápido para traducir la web al instante.
+    // OpenRouter primero (3 modelos gratuitos distintos para máxima fiabilidad:
+    // streak estable y rápido para traducir la web al instante). OpenAI queda como
+    // red de seguridad al final (por si hay créditos).
     if (orKey) {
-      this.providers.push(new OpenRouterProvider(orKey));
       this.providers.push(new OpenRouterProvider(orKey, { model: "minimax/minimax-m2.7:free" }));
       this.providers.push(new OpenRouterProvider(orKey, { model: "cohere/north-mini-code:free" }));
     }

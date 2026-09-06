@@ -157,7 +157,7 @@ REGLAS:
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
   const bodyOnly = extractBody(html);
-  const safe = bodyOnly.slice(0, 30000);
+  const safe = bodyOnly.slice(0, 12000);
   const visible = extractVisibleTexts(bodyOnly);
   const list = visible.map((t, i) => `${i + 1}. ${t}`).join("\n");
   return `TENDA / DOMINIO: ${domain}
@@ -178,24 +178,31 @@ Devuelve el JSON.`;
  * enlaces, párrafos) para que la IA los traduzca/renombre de forma fiable.
  */
 function extractVisibleTexts(body: string): string[] {
-  const out: string[] = [];
   const regex = /<(\w+)\b[^>]*>([^<]{2,120})<\/(\1)>/gi;
-  let m: RegExpExecArray | null;
   const tags = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "span", "li", "strong", "em"]);
+  const priority = new Set(["h1", "h2", "h3", "h4", "button"]);
+  const priorityOut: string[] = [];
+  const restOut: string[] = [];
   const seen = new Set<string>();
-  while ((m = regex.exec(body)) !== null && out.length < 100) {
+  let m: RegExpExecArray | null;
+  const push = (tag: string, txt: string, arr: string[]) => {
+    if (arr.length >= 30) return;
+    const allLower = txt.replace(/\s+/g, " ").trim();
+    if (allLower.length < 2) return;
+    if (/^[\s\W_]+$/.test(txt)) return;
+    if (seen.has(txt)) return;
+    seen.add(txt);
+    arr.push(txt);
+  };
+  while ((m = regex.exec(body)) !== null) {
     const tag = m[1].toLowerCase();
     if (!tags.has(tag)) continue;
-    let txt = m[2].replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&aacute;|&eacute;|&iacute;|&oacute;|&uacute;|&ntilde;/gi, "").trim();
+    const txt = m[2].replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&aacute;|&eacute;|&iacute;|&oacute;|&uacute;|&ntilde;/gi, "").trim();
     if (!txt) continue;
-    const allLower = txt.replace(/\s+/g, " ").trim();
-    if (allLower.length < 2) continue;
-    if (/^[\s\W_]+$/.test(txt)) continue;
-    if (seen.has(txt)) continue;
-    seen.add(txt);
-    out.push(txt);
+    push(tag, txt, priority.has(tag) ? priorityOut : restOut);
   }
-  return out;
+  const out = priorityOut.concat(restOut);
+  return out.slice(0, 30);
 }
 
 /** Detecta si el usuario pide cambiar el idioma de la web (necesita más tokens y ops replaceByText). */
