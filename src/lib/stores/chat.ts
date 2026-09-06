@@ -177,7 +177,7 @@ Devuelve el JSON.`;
  * Extrae los textos visibles más relevantes de la web (titulares, botones,
  * enlaces, párrafos) para que la IA los traduzca/renombre de forma fiable.
  */
-function extractVisibleTexts(body: string): string[] {
+function extractVisibleTexts(body: string, cap = 30): string[] {
   const regex = /<(\w+)\b[^>]*>([^<]{2,120})<\/(\1)>/gi;
   const tags = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "span", "li", "strong", "em", "label", "legend", "figcaption"]);
   const priority = new Set(["h1", "h2", "h3", "h4", "button", "label", "legend"]);
@@ -186,7 +186,7 @@ function extractVisibleTexts(body: string): string[] {
   const seen = new Set<string>();
   let m: RegExpExecArray | null;
   const push = (tag: string, txt: string, arr: string[]) => {
-    if (arr.length >= 30) return;
+    if (arr.length >= cap) return;
     const allLower = txt.replace(/\s+/g, " ").trim();
     if (allLower.length < 2) return;
     if (/^[\s\W_]+$/.test(txt)) return;
@@ -215,7 +215,7 @@ function extractVisibleTexts(body: string): string[] {
     fullOut.push(txt);
   }
   const out = fullOut.concat(priorityOut, restOut);
-  return out.slice(0, 30);
+  return out.slice(0, cap);
 }
 
 /** Normaliza espacios y minúsculas para comparar textos visibles entre HTML y ops. */
@@ -941,7 +941,7 @@ export async function chatEditStoreStream(
     // proveedor pidiendo traducir SOLO los pendientes, hasta cubrirlos o agotar
     // pasadas. Así la web queda completa, no solo una parte.
     if (isLanguageChange(opts.request)) {
-      const baseVisible = extractVisibleTexts(opts.html);
+      const baseVisible = extractVisibleTexts(opts.html, 150);
       const covered = new Set<string>();
       const markCovered = (op: ChatOp) => {
         if (op.op === "replaceByText" && op.text) covered.add(normSp(op.text));

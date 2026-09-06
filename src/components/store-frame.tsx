@@ -156,9 +156,9 @@ const OPS_RECEIVER = `
       var sel = typeof op.selector === 'string' && op.selector.trim() ? op.selector.trim() : null;
       var val = op.value !== undefined ? op.value : (op.text !== undefined ? op.text : (op.src !== undefined ? op.src : (op.html !== undefined ? op.html : '')));
       if (op.op === 'replaceByText') {
-        var want = String(op.text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+        var norm = function (s) { return String(s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase(); };
+        var want = norm(op.text);
         if (!want) return { ok: false, selector: op.text };
-        var norm = function (s) { return String(s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(); };
         var allEls = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,a,button,span,li,strong,em,label,legend,figcaption,div');
         // Reemplaza TODAS las ocurrencias del texto (un mismo rótulo suele aparecer
         // en header, menú móvil, footer...). Para no pisar contenedores anidados,
