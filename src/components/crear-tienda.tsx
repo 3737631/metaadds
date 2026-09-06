@@ -56,6 +56,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [chatMsgs, setChatMsgs] = useState<{ role: "user" | "ai" | "sys"; text: string }[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [appliedCount, setAppliedCount] = useState(0);
   const chatOpsRef = useRef<((ops: ChatOp[]) => void) | null>(null);
   const [streamingReply, setStreamingReply] = useState<string | null>(null);
   const typewriterRef = useRef<number | null>(null);
@@ -158,6 +159,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setChatMsgs((prev) => [...prev, { role: "user", text: req }]);
     setChatInput("");
     setChatLoading(true);
+    setAppliedCount(0);
     setError(null);
 
     let reply = "";
@@ -201,11 +203,17 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             for (const op of data.ops) {
               if (chatOpsRef.current) chatOpsRef.current([op]);
             }
+            setAppliedCount((c) => c + data.ops.length);
           } else if (data.type === "reply" && typeof data.text === "string") {
             reply = data.text;
             showStreamingReply(data.text);
           } else if (data.type === "done") {
             gotDone = true;
+            // Si el modelo terminó pero no escribió texto de respuesta, fijamos
+            // el mensaje final para que el estado "Aplicando cambios…" no cuelgue.
+            if (!reply && !streamingReply) {
+              commitReply(reply, "He aplicado tus cambios.");
+            }
           } else if (data.type === "error" && typeof data.message === "string") {
             errorMsg = data.message;
           }
@@ -535,7 +543,8 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
               )}
               {chatLoading && streamingReply === null && (
                 <div className="self-start flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-dim">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Aplicando cambios…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
+                  {appliedCount > 0 ? `Aplicando ${appliedCount} cambios…` : "Aplicando cambios…"}
                 </div>
               )}
             </div>
