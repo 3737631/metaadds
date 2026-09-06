@@ -201,7 +201,20 @@ function extractVisibleTexts(body: string): string[] {
     if (!txt) continue;
     push(tag, txt, priority.has(tag) ? priorityOut : restOut);
   }
-  const out = priorityOut.concat(restOut);
+  // Captura también el textContent COMPLETO de encabezados y botones aunque tengan
+  // etiquetas anidadas (p. ej. <h2>…<span>La combinación</span>) para que el modelo
+  // traduzca la frase entera y el receptor la reemplace whole en el iframe.
+  const fullRegex = /<(h[1-6]|button)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  const fullOut: string[] = [];
+  while ((m = fullRegex.exec(body)) !== null) {
+    const txt = m[2].replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&aacute;|&eacute;|&iacute;|&oacute;|&uacute;|&ntilde;/gi, "").replace(/\s+/g, " ").trim();
+    if (!txt || txt.length < 3) continue;
+    if (fullOut.length >= 10) break;
+    if (seen.has(txt)) continue;
+    seen.add(txt);
+    fullOut.push(txt);
+  }
+  const out = fullOut.concat(priorityOut, restOut);
   return out.slice(0, 30);
 }
 
