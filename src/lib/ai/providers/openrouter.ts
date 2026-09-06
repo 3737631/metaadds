@@ -75,4 +75,88 @@ export class OpenRouterProvider implements AIProvider {
         : undefined,
     };
   }
+
+  async stream(
+    input: AIProviderInput,
+    onDelta: (chunk: string) => void
+  ): Promise<AIProviderResult> {
+    const t0 = Date.now();
+    let firstContentMs = -1;
+    const firstContent = () => {
+      if (firstContentMs < 0) firstContentMs = Date.now() - t0;
+    };
+    const model = input.model ?? this.defaultModel ?? "openrouter/free";
+    const body: Record<string, unknown> = {
+      model,
+      messages: [
+        { role: "system", content: input.systemPrompt },
+        { role: "user", content: input.userPrompt },
+      ],
+      temperature: input.temperature ?? 0.7,
+      max_tokens: Math.max(input.maxTokens ?? 1600, 3200),
+      stream: true,
+    };
+    // NO enviamos response_format:json_object en streaming: muchos modelos
+    // (minimax) bufferizan toda la salida JSON y no emiten deltas incrementales,
+    // lo que anula la aplicación en vivo. Aquí el JSON se exige por prompt y se
+    // parsea incrementalmente con extractCompleteOps/repairJson.
+
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://meta-winners.vercel.app",
+        "X-Title": "Meta Winners AI",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      throw new Error(`OpenRouter stream ${res.status}: ${err.slice(0, 200)}`);
+    }
+    if (!res.body) throw new Error("OpenRouter stream: sin cuerpo");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let out = "";
+    let deltas = 0;
+    let firstDeltaLen = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(payload);
+          const delta = chunk?.choices?.[0]?.delta;
+          const text = delta?.content ?? delta?.reasoning_content ?? "";
+          if (typeof text === "string" && text) {
+            out += text;
+            firstContent();
+            if (deltas === 0) firstDeltaLen = text.length;
+            deltas++;
+            onDelta(text);
+          }
+        } catch {
+          /* fragmento parcial: se ignora */
+        }
+      }
+    }
+    console.log(`[or-stream] model=${model} ttft=${firstContentMs} dur=${Date.now() - t0} deltas=${deltas} firstDeltaLen=${firstDeltaLen} outLen=${out.length} head=${out.slice(0, 160).replace(/\\s+/g, ' ')}`);
+
+    return {
+      content: out,
+      model,
+      provider: this.id,
+    };
+  }
 }

@@ -16,8 +16,8 @@ export class AIService {
     // streak estable y rápido para traducir la web al instante). OpenAI queda como
     // red de seguridad al final (por si hay créditos).
     if (orKey) {
-      this.providers.push(new OpenRouterProvider(orKey, { model: "minimax/minimax-m2.7:free" }));
       this.providers.push(new OpenRouterProvider(orKey, { model: "cohere/north-mini-code:free" }));
+      this.providers.push(new OpenRouterProvider(orKey, { model: "minimax/minimax-m2.7:free" }));
     }
     if (groqKey) this.providers.push(new GroqProvider(groqKey));
     if (gemKey) this.providers.push(new GeminiProvider(gemKey));

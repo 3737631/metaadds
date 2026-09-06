@@ -157,7 +157,7 @@ REGLAS:
 
 function buildUserPrompt(html: string, domain: string, request: string): string {
   const bodyOnly = extractBody(html);
-  const safe = bodyOnly.slice(0, 12000);
+  const safe = bodyOnly.slice(0, 6000);
   const visible = extractVisibleTexts(bodyOnly);
   const list = visible.map((t, i) => `${i + 1}. ${t}`).join("\n");
   return `TENDA / DOMINIO: ${domain}
