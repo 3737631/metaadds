@@ -205,6 +205,18 @@ function extractVisibleTexts(body: string): string[] {
   return out.slice(0, 30);
 }
 
+/** Normaliza espacios y minúsculas para comparar textos visibles entre HTML y ops. */
+function normSp(t: string): string {
+  return t
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Máximo de pasadas de cobertura tras una traducción de idioma (para completar la web). */
+const LANGUAGE_COVER_PASSES = 3;
+
 /** Detecta si el usuario pide cambiar el idioma de la web (necesita más tokens y ops replaceByText). */
 function isLanguageChange(request: string): boolean {
   const r = request.toLowerCase();
@@ -821,6 +833,73 @@ export async function chatEditStoreStream(
         console.error("[chatStream][DEBUG] lang-change raw buf:", buf.slice(0, 6000));
       }
       continue;
+    }
+
+    // BUCLE DE COBERTURA para cambios de idioma: si tras esta pasada quedan
+    // textos visibles sin traducir, hacemos pasadas adicionales con el MISMO
+    // proveedor pidiendo traducir SOLO los pendientes, hasta cubrirlos o agotar
+    // pasadas. Así la web queda completa, no solo una parte.
+    if (isLanguageChange(opts.request)) {
+      const baseVisible = extractVisibleTexts(opts.html);
+      const covered = new Set<string>();
+      const markCovered = (op: ChatOp) => {
+        if (op.op === "replaceByText" && op.text) covered.add(normSp(op.text));
+      };
+      for (const op of delivered) markCovered(op);
+      const pending = () => baseVisible.filter((t) => !covered.has(normSp(t)));
+      let pend = pending();
+      let pass = 0;
+      while (pend.length > 0 && pass < LANGUAGE_COVER_PASSES) {
+        pass++;
+        const pendList = pend.map((t, i) => `${i + 1}. ${t}`).join("\n");
+        const followPrompt = `TENDA / DOMINIO: ${opts.domain}\n\nINSTRUCCIÓN DEL USUARIO: ${opts.request}\n\nQuedan estos textos de la web AÚN sin traducir. Devuelve SOLO las operaciones "replaceByText" para traducirlos TODOS al idioma pedido (no dejes ninguno). "text" = texto español exacto, "newText" = traducción.\n\nTEXTOS PENDIENTES:\n${pendList}\n\nDevuelve el JSON {"ops":[...]}.`;
+        let fb = "";
+        let fbEmitted = 0;
+        const fbTask = service
+          .streamAt(
+            attempt,
+            {
+              systemPrompt: buildSystemPrompt(),
+              userPrompt: followPrompt,
+              responseFormat: "json",
+              temperature: 0.4,
+              maxTokens: isLanguageChange(opts.request) ? 6000 : 2048,
+            },
+            (delta) => {
+              fb += delta;
+              const complete = extractCompleteOps(fb);
+              if (complete.length > fbEmitted) {
+                for (const raw of complete.slice(fbEmitted)) {
+                  for (const op of chatOpsFromArray([raw])) {
+                    delivered.push(op);
+                    handlers.onOp(op);
+                    markCovered(op);
+                  }
+                }
+                fbEmitted = complete.length;
+              }
+            }
+          )
+          .catch((err) => {
+            console.warn(`[chatStream] pasada de cobertura ${pass} falló:`, err);
+            return null;
+          });
+        const fbTimeout = new Promise<symbol>((resolve) =>
+          setTimeout(() => resolve(TIMEOUT), ATTEMPT_TIMEOUT)
+        );
+        const fbOutcome = await Promise.race([fbTask, fbTimeout]);
+        if (!fbOutcome || fbOutcome === TIMEOUT || fbEmitted === 0) {
+          console.warn(
+            `[chatStream] pasada de cobertura ${pass}: sin ops nuevas (${fbEmitted}), paro`
+          );
+          break;
+        }
+        console.warn(`[chatStream] pasada de cobertura ${pass}: +${fbEmitted} ops (${delivered.length} total)`);
+        pend = pending();
+      }
+      if (pend.length > 0) {
+        console.warn(`[chatStream] quedan sin cubrir ${pend.length} textos:`, pend.slice(0, 10));
+      }
     }
 
     console.warn(`[chatStream] intento ${attempt + 1}/${maxAttempts} OK: ${delivered.length} ops (${result!.provider}/${result!.model})`);

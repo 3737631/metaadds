@@ -37,4 +37,5 @@ next-env.d.ts
 /.playwright-mcp/
 /dev.log
 deploy*.log
-vlogs.log
+vlogs*.log
+verify*.log
