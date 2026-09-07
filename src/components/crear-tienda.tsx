@@ -43,6 +43,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [searching, setSearching] = useState(false);
   const [candidates, setCandidates] = useState<StoreCandidate[]>([]);
   const [searchNote, setSearchNote] = useState("");
+  const [urlInput, setUrlInput] = useState("");
   const [selected, setSelected] = useState<StoreCandidate | null>(null);
   const [opening, setOpening] = useState(false);
   const [snapshot, setSnapshot] = useState<import("@/lib/stores/snapshot").StoreSnapshot | null>(null);
@@ -115,6 +116,34 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     } finally {
       setSearching(false);
     }
+  }
+
+  // Abre una URL pegada por el usuario en el mismo editor (mini web + chat).
+  function doOpenUrl() {
+    const raw = urlInput.trim();
+    if (!raw) return;
+    let u: URL;
+    try {
+      u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    } catch {
+      setError("Esa URL no es válida. Ej: https://mitienda.com");
+      return;
+    }
+    const domain = u.hostname.replace(/^www\./, "");
+    const c: StoreCandidate = {
+      id: `custom-${domain}`,
+      name: domain,
+      url: u.toString(),
+      domain,
+      category: "",
+      country: "",
+      similarity: 0,
+      shopify: false,
+      verified: false,
+      title: domain,
+      snippet: "",
+    };
+    doOpen(c);
   }
 
   async function doOpen(c: StoreCandidate) {
@@ -422,6 +451,41 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
           {searching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
           {searching ? "Buscando tiendas..." : "VER TIENDAS QUE FUNCIONAN"}
         </button>
+
+        <div className="flex items-center gap-3 py-1">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-[11px] font-medium uppercase tracking-wider text-faint">o con tu propia web</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        <label className="block text-left">
+          <span className="text-xs font-medium text-dim">URL de tu web</span>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="text"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") doOpenUrl();
+              }}
+              placeholder="https://mitienda.com"
+              className="w-full rounded-2xl border border-border bg-surface px-4 py-3.5 text-base text-text placeholder:text-faint focus:border-accent focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={doOpenUrl}
+              disabled={!urlInput.trim() || opening}
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-2xl bg-accent px-5 py-3.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40"
+            >
+              {opening && selected?.id?.startsWith("custom-") ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowRight className="h-4 w-4" />
+              )}
+              {opening && selected?.id?.startsWith("custom-") ? "Abriendo..." : "ABRIR"}
+            </button>
+          </div>
+        </label>
       </div>
 
       {step === "topic" ? (
@@ -501,10 +565,10 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
           <div className="flex items-center justify-between">
             <button
               type="button"
-              onClick={() => setStep("result")}
+              onClick={() => setStep(selected?.id?.startsWith("custom-") ? "topic" : "result")}
               className="inline-flex items-center gap-1 text-sm text-dim hover:text-text"
             >
-              <ArrowLeft className="h-4 w-4" /> Volver a tiendas
+              <ArrowLeft className="h-4 w-4" /> {selected?.id?.startsWith("custom-") ? "Volver al inicio" : "Volver a tiendas"}
             </button>
             <span className="text-xs text-faint">Vista fiel de la web real</span>
           </div>
