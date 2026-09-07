@@ -1284,5 +1284,37 @@ export function deterministicFallback(opts: { html: string; request: string }): 
     }
   }
 
+  // 5) Tamaño de letra: "agranda el titular", "haz el texto más grande",
+  //    "reduce la letra", "hazlo más pequeño".
+  const sizeLarger = /(?:agrand|aument|ampl[ií]|sube\b|m[aá]s\s+grandes?|deja\s+grande)/i.test(r) && !/(peque|reducir|reduce\b|encoge)/i.test(r);
+  const sizeSmaller = /(?:peque[ñn][oa]s?|encoge|reducir|reduce\b|baja\s+la\s+letra|haz\s+.{0,12}m[aá]s\s+peque[ñn]o)/i.test(r);
+  if (sizeLarger || sizeSmaller) {
+    const pct = sizeSmaller ? "90%" : "120%";
+    const css = /titul|heading|encabe|title/i.test(r)
+      ? `h1,h2,h3,h4,h5,h6{font-size:${pct} !important}`
+      : `body{font-size:${sizeSmaller ? "92%" : "112%"} !important}`;
+    ops.push({ op: "injectCss", css });
+    return {
+      ops,
+      reply: sizeSmaller
+        ? "He reducido el tamaño del texto. Dime si quieres ajustarlo más."
+        : "He agrandado el texto. Dime si quieres ajustarlo más.",
+    };
+  }
+
+  // 6) Alineación: "centra el título", "alinea el texto a la derecha".
+  const align = /(?:centra|centrar|al\s+centro|c[ée]ntral)|(?:derechar?|a\s+la\s+derecha|align\s+right)|(?:justific)/i.test(r)
+    ? /(?:derechar?|a\s+la\s+derecha|align\s+right)/i.test(r)
+      ? "right"
+      : /justific/i.test(r)
+        ? "justify"
+        : "center"
+    : "";
+  if (align) {
+    const target = /titul|heading|encabe|title/i.test(r) ? "h1,h2,h3,h4,h5,h6" : "h1,h2,h3,h4,h5,h6,p,div";
+    ops.push({ op: "injectCss", css: `${target}{text-align:${align} !important}` });
+    return { ops, reply: `He alineado el texto ${{ center: "al centro", right: "a la derecha", justify: "justificado" }[align]}.` };
+  }
+
   return { ops: [], reply: "" };
 }

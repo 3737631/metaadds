@@ -1,0 +1,12 @@
+data: {"type":"ops","ops":[{"op":"injectCss","css":"button, .btn { background-color: #e11d48; color: #fff; }"}]}
+
+data: {"type":"reply","text":"Cambiando el color de los botones a rojo."}
+
+data: {"type":"ops","ops":[{"op":"injectCss","css":".btn,.btn--secondary,button[type=\"submit\"],input[type=\"submit\"],a.btn,.product-form__cart-submit,.slideshow__scroll-button{background-color:#e11d48!important;color:#ffffff!important;border-color:#e11d48!important}"}]}
+
+data: {"type":"reply","text":"Voy a poner todos los botones principales de la tienda en rojo."}
+
+data: {"type":"done","provider":"openrouter","model":"minimax/minimax-m2.7:free"}
+
+data: [DONE]
+

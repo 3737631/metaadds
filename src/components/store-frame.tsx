@@ -23,7 +23,19 @@ const BASE_WIDTH = 1200; // ancho lógico sobre el que está maquetada la miniwe
 const EDITOR_SCRIPT = `
 (function () {
   var BOOT = '__ED__';
+  var EDIT_ON = false;
   function qa(s) { return Array.prototype.slice.call(document.querySelectorAll(s)); }
+
+  function setEdit(on) {
+    EDIT_ON = !!on;
+    document.documentElement.classList.toggle('__META_ED', EDIT_ON);
+    if (EDIT_ON) { tag(); }
+    else { closeImageBar(); }
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (d && d.type === 'mode') setEdit(d.edit);
+  });
 
   function isTextEl(el) {
     if (!el) return false;
@@ -54,18 +66,19 @@ const EDITOR_SCRIPT = `
     });
   }
 
-  // 2) Inyectar estilos de edición
+  // 2) Inyectar estilos de edición (solo visibles con html.__META_ED = modo edición)
   var st = document.createElement('style');
   st.textContent = [
-    '[data-eid][data-edit="1"] { outline:1.5px dashed rgba(59,130,246,.75) !important; outline-offset:1px; cursor:text !important; transition: background .15s; }',
-    '[data-eid][data-edit="1"]:hover { background: rgba(59,130,246,.08); }',
-    '[data-eid][data-img="1"] { cursor:pointer; }',
-    '[data-drop="1"] { outline:3px dashed #22c55e !important; outline-offset:2px; }',
-    '.ed-banner { position:fixed; top:0; left:0; right:0; z-index:99999; background:#2563eb; color:#fff; text-align:center; font:600 12px/20px system-ui,sans-serif; letter-spacing:.2px; }'
+    'html.__META_ED [data-eid][data-edit="1"] { outline:1.5px dashed rgba(59,130,246,.75) !important; outline-offset:1px; cursor:text !important; transition: background .15s; }',
+    'html.__META_ED [data-eid][data-edit="1"]:hover { background: rgba(59,130,246,.08); }',
+    'html.__META_ED [data-eid][data-img="1"] { cursor:pointer; }',
+    'html.__META_ED [data-drop="1"] { outline:3px dashed #22c55e !important; outline-offset:2px; }',
+    '.ed-banner { position:fixed; top:0; left:0; right:0; z-index:99999; display:none; background:#2563eb; color:#fff; text-align:center; font:600 12px/20px system-ui,sans-serif; letter-spacing:.2px; }',
+    'html.__META_ED .ed-banner { display:block; }'
   ].join('\\n');
   document.head.appendChild(st);
 
-  // Banner informativo
+  // Banner informativo (visible solo en modo edición)
   var banner = document.createElement('div');
   banner.className = 'ed-banner';
   banner.textContent = 'Clic para editar: toca cualquier texto o imagen · arrastra una foto encima para cambiarla';
@@ -208,6 +221,7 @@ const EDITOR_SCRIPT = `
 
   // Drag & drop: arrastrar una foto de tu navegador sobre una imagen la reemplaza.
   document.addEventListener('dragover', function (e) {
+    if (!EDIT_ON) return;
     var el = e.target && e.target.closest ? e.target.closest('[data-eid]') : null;
     if (el && e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.indexOf('Files') !== -1) {
       e.preventDefault();
@@ -215,10 +229,12 @@ const EDITOR_SCRIPT = `
     }
   }, true);
   document.addEventListener('dragleave', function (e) {
+    if (!EDIT_ON) return;
     var el = e.target && e.target.closest ? e.target.closest('[data-drop]') : null;
     if (el) el.removeAttribute('data-drop');
   }, true);
   document.addEventListener('drop', function (e) {
+    if (!EDIT_ON) return;
     var el = e.target && e.target.closest ? e.target.closest('[data-eid]') : null;
     if (!el || !e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
     var f = e.dataTransfer.files[0];
@@ -234,6 +250,7 @@ const EDITOR_SCRIPT = `
   // Delegación de clics (captura). Los enlaces NO navegan si son editables; el
   // propio preventDefault lo garantiza; los no-editables conservan su href.
   document.addEventListener('click', function (e) {
+    if (!EDIT_ON) return;
     var t = e.target;
     if (t && t === banner) return;
     // Los clics sobre la barra de acciones de foto (Elegir/Borrar/URL) no se
@@ -435,31 +452,38 @@ const OPS_RECEIVER = `
     }
     // Serializar el DOM modificado para que el padre lo reutilice al cambiar de modo.
     if (d.type === 'request-state') {
-      ['__meta_ops', '__meta_editor'].forEach(function (id) {
-        var s = document.getElementById(id);
+      // Trabajamos sobre un CLON limpio: así el modo edición en vivo (banner,
+      // data-eid, __META_ED) se queda intacto en pantalla.
+      var clone = document.documentElement.cloneNode(true);
+      if (clone.classList) clone.classList.remove('__META_ED');
+      ['__meta_ops', '__meta_editor', '__meta_quiet'].forEach(function (id) {
+        var s = clone.querySelector ? clone.querySelector('script#' + id) : null;
         if (s && s.parentNode) s.parentNode.removeChild(s);
       });
-      var banner = document.querySelector('.ed-banner');
-      if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
-      // La barra de acciones de foto y los inputs de subida temporales no se guardan.
-      var bars = document.querySelectorAll('[data-eid^="bar"], .__ed_file');
-      for (var bi = 0; bi < bars.length; bi++) {
-        var barEl = bars[bi];
-        if (barEl && barEl.parentNode) barEl.parentNode.removeChild(barEl);
+      var markerEls = clone.querySelectorAll ? clone.querySelectorAll('.ed-banner, [data-eid^="bar"], .__ed_file') : [];
+      for (var mi = 0; mi < markerEls.length; mi++) {
+        var me = markerEls[mi];
+        if (me && me.parentNode) me.parentNode.removeChild(me);
       }
-      var tagged = document.querySelectorAll('[data-eid], [data-edit], [contenteditable], [__ED__]');
+      var tagged = clone.querySelectorAll ? clone.querySelectorAll('[data-eid], [data-edit], [contenteditable], [__ED__]') : [];
       for (var ti = 0; ti < tagged.length; ti++) {
-        var el = tagged[ti];
-        el.removeAttribute('data-eid');
-        el.removeAttribute('data-edit');
-        el.removeAttribute('contenteditable');
-        el.removeAttribute('__ED__');
+        var cel = tagged[ti];
+        cel.removeAttribute('data-eid');
+        cel.removeAttribute('data-edit');
+        cel.removeAttribute('contenteditable');
+        cel.removeAttribute('__ED__');
       }
       if (parent && parent !== window) {
-        parent.postMessage({ type: 'iframe-state', html: document.documentElement.outerHTML }, '*');
+        parent.postMessage({ type: 'iframe-state', html: clone.outerHTML }, '*');
       }
     }
   });
+
+  // El iframe está listo: el padre reenvía el modo de edición actual (por si se
+  // ha recargado el iframe y el script vuelve a nacer con el modo desactivado).
+  setTimeout(function () {
+    if (parent && parent !== window) parent.postMessage({ type: 'iframe-ready' }, '*');
+  }, 300);
 })();
 `;
 
@@ -529,10 +553,16 @@ export default function StoreFrame({
     function handler(e: MessageEvent) {
       if (e.source !== iframeRef.current?.contentWindow) return;
       const d = e.data;
-      if (d && d.type === "snapshot-edit") {
+      if (!d) return;
+      if (d.type === "iframe-ready") {
+        // El iframe acaba de recargarse: restauramos el modo de edición vigente.
+        iframeRef.current?.contentWindow?.postMessage({ type: "mode", edit: editModeRef.current }, "*");
+        return;
+      }
+      if (d.type === "snapshot-edit") {
         onEdit(String(d.eid), String(d.mode), String(d.value));
       }
-      if (d && d.type === "iframe-state" && typeof d.html === "string" && onState) {
+      if (d.type === "iframe-state" && typeof d.html === "string" && onState) {
         onState(d.html);
       }
     }
@@ -541,11 +571,10 @@ export default function StoreFrame({
   }, [onEdit, onState]);
 
   const editableSrc = useMemo(() => {
-    // Siempre inyectamos el receptor de operaciones del chatbot para poder aplicar
-    // cambios por chat aunque no estemos en modo edición.
+    // Siempre inyectamos el receptor de operaciones del chatbot y el editor
+    // click-to-edit; el modo edición se activa/desactiva en vivo con {type:'mode'}
+    // para NO recargar el iframe al pulsar EDITAR/LISTO (mantiene scroll y cambios).
     if (html.indexOf("</body>") === -1) return html;
-    // El bootstrap silencioso se inserta justo tras <head> para que corra ANTES de los
-    // scripts del tema (así silencia sus errores de consola del entorno aislado).
     const headIdx = html.indexOf("<head>");
     const quietInjected =
       headIdx !== -1
@@ -554,17 +583,19 @@ export default function StoreFrame({
           html.slice(headIdx + "<head>".length)
         : html;
     const bidx = quietInjected.lastIndexOf("</body>");
-    // Concatenación simple (no template literal) para obtener un `</script>` REAL que
-    // cierre la etiqueta en el srcdoc; un `<\/script>` escapado dejaría el <script>
-    // abierto y el parser se tragaría el resto del HTML.
     const receiver = '<script id="__meta_ops">' + OPS_RECEIVER + "</script>";
-    if (!editMode) {
-      return quietInjected.slice(0, bidx) + receiver + quietInjected.slice(bidx);
-    }
-    // En modo edición añadimos además el editor click-to-edit.
     const editor = '<script id="__meta_editor">' + EDITOR_SCRIPT + "</script>";
     return quietInjected.slice(0, bidx) + receiver + editor + quietInjected.slice(bidx);
-  }, [html, editMode]);
+  }, [html]);
+
+  // Sincroniza el modo de edición con el iframe (sin recargar la página).
+  const editModeRef = useRef(editMode);
+  useEffect(() => {
+    editModeRef.current = editMode;
+  }, [editMode]);
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: "mode", edit: editMode }, "*");
+  }, [editMode]);
 
   const scale = width > 0 ? width / BASE_WIDTH : 1;
   const viewportH = 520;

@@ -1,0 +1,41 @@
+Total messages: 16 (Errors: 16, Warnings: 0)
+
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+[ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dulce-hogar-shop.myshopify.com/null/.well-known/shopify/monorail/unstable/produce_batch:0
+Uncaught TypeError: Cannot read properties of null (reading 'removeAttr')
+    at slideshowA11y (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:20228)
+    at dispatch (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:13:16844)
+    at g.handle (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:13:14919)
+    at trigger (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:14:7179)
+    at <anonymous> (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:14:7743)
+    at each (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:12:14842)
+    at each (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:12:12809)
+    at trigger (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:14:7718)
+    at e.init (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:37:19048)
+    at <anonymous> (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:37:2831)
+    at i.fn.slick (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:37:42780)
+    at slideshow (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:20020)
+    at SlideshowSection (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:47515)
+    at _createInstance (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:818)
+    at <anonymous> (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:2296)
+    at each (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:12:14842)
+    at each (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:12:12809)
+    at register (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:2260)
+    at <anonymous> (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/theme.js?v=50154102843704998031574134880:0:48375)
+    at u (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:13:6579)
+    at fireWith (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:13:7347)
+    at ready (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:13:9164)
+    at s (https://dulce-hogar-shop.myshopify.com/cdn/shop/t/2/assets/vendor.js?v=102103181905295982481574134865:12:944)

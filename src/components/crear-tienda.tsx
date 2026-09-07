@@ -17,6 +17,7 @@ import {
   Pencil,
   Send,
   Sparkles,
+  Eye,
 } from "lucide-react";
 
 type Category = { id: string; label: string };
@@ -36,6 +37,14 @@ interface StoreCandidate {
 }
 
 type Step = "topic" | "result" | "editor";
+
+const SUGGESTIONS = [
+  "Traduce la web a inglés",
+  "Pon el botón en rojo",
+  "Quita el banner de cookies",
+  "Centra el título",
+  "Agranda el titular",
+];
 
 export default function CrearTienda({ categories }: { categories: Category[] }) {
   const [step, setStep] = useState<Step>("topic");
@@ -61,8 +70,9 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const chatOpsRef = useRef<((ops: ChatOp[]) => void) | null>(null);
   const chatStateRef = useRef<(() => void) | null>(null);
   const [liveHtml, setLiveHtml] = useState<string | null>(null);
+  const [stableHtml, setStableHtml] = useState<string | null>(null);
   const [editingPending, setEditingPending] = useState(false);
-  const editTargetRef = useRef<boolean | null>(null);
+  const exitPendingRef = useRef(false);
   const [streamingReply, setStreamingReply] = useState<string | null>(null);
   const [typingActive, setTypingActive] = useState(false);
   const typewriterRef = useRef<number | null>(null);
@@ -72,26 +82,35 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setTimeout(() => setNotif(null), 2500);
   }
 
-  // Al entrar/salir de edición, primero pide al iframe serializar su DOM ya
-  // modificado (cambios del chat o click-to-edit) y recién entonces cambia de
-  // modo usando ese HTML — así los cambios no se pierden al recargar el iframe.
+  // Entrar en edición es INSTANTÁNEO (sin recargar el iframe, por mensaje).
+  // Salir de edición: primero capturamos el HTML limpio (clon) y solo entonces
+  // cambiamos el modo, para que la persiana no recargue antes de guardar.
   function commitEditing(next: boolean) {
-    editTargetRef.current = next;
-    setEditingPending(true);
-    chatStateRef.current?.();
-    window.setTimeout(() => {
-      if (editTargetRef.current === null) return;
-      setEditing(editTargetRef.current);
-      editTargetRef.current = null;
+    if (next) {
+      setStableHtml(liveHtml ?? snapshot?.html ?? null);
+      setEditing(true);
       setEditingPending(false);
-    }, 800);
+      window.setTimeout(() => chatStateRef.current?.(), 60);
+    } else {
+      exitPendingRef.current = true;
+      setEditingPending(true);
+      chatStateRef.current?.();
+      window.setTimeout(() => {
+        if (exitPendingRef.current) {
+          exitPendingRef.current = false;
+          setEditing(false);
+          setEditingPending(false);
+        }
+      }, 2000);
+    }
   }
 
   function onIframeState(html: string) {
-    if (editTargetRef.current === null) return;
     setLiveHtml(html);
-    setEditing(editTargetRef.current);
-    editTargetRef.current = null;
+    if (exitPendingRef.current) {
+      exitPendingRef.current = false;
+      setEditing(false);
+    }
     setEditingPending(false);
   }
 
@@ -157,8 +176,8 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setChatInput("");
     setStreamingReply(null);
     setLiveHtml(null);
+    setStableHtml(null);
     setEditingPending(false);
-    editTargetRef.current = null;
     try {
       // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
       let snapRes = await fetch("/api/stores/snapshot", {
@@ -615,34 +634,47 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
             >
               <ArrowLeft className="h-4 w-4" /> {selected?.id?.startsWith("custom-") ? "Volver al inicio" : "Volver a tiendas"}
             </button>
-            <span className="text-xs text-faint">Vista fiel de la web real</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1 text-[11px] font-bold text-dim">
+              <span className={"h-1.5 w-1.5 rounded-full " + (editing ? "bg-accent2" : "bg-emerald-400")} />
+              {editing ? "MODO EDICIÓN" : "MODO VISTA"}
+            </span>
           </div>
 
-          {/* Botón grande de edición */}
-          {!editing ? (
+          {/* Selector de modo: Vista | Editar (sin recargas) */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => commitEditing(false)}
+              disabled={editingPending || !editing}
+              className={
+                "flex items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-bold transition-transform active:scale-[0.98] disabled:opacity-50 " +
+                (!editing ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/25" : "border border-border bg-surface text-dim hover:text-text")
+              }
+            >
+              <Eye className="h-5 w-5" /> Vista
+            </button>
             <button
               type="button"
               onClick={() => commitEditing(true)}
-              disabled={editingPending}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-base font-bold text-white shadow-lg shadow-accent/25 transition-transform active:scale-[0.98] hover:brightness-110 disabled:opacity-60"
+              disabled={editingPending || editing}
+              className={
+                "flex items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-bold transition-transform active:scale-[0.98] disabled:opacity-50 " +
+                (editing ? "bg-accent text-white shadow-lg shadow-accent/25" : "border border-border bg-surface text-dim hover:text-text")
+              }
             >
-              <Pencil className="h-6 w-6" /> {editingPending ? "Guardando cambios…" : "EDITAR"}
+              <Pencil className="h-5 w-5" /> Editar
             </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => commitEditing(false)}
-                disabled={editingPending}
-                className="flex flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/50 bg-emerald-500/10 px-6 py-4 text-base font-bold text-emerald-400 hover:brightness-110 disabled:opacity-60"
-              >
-                <Check className="h-6 w-6" /> {editingPending ? "Guardando cambios…" : "LISTO"}
-              </button>
+          </div>
+
+          {editing && (
+            <div className="rounded-xl border border-accent2/30 bg-accent2/10 px-4 py-3 text-xs font-medium text-accent2">
+              Toca un texto para reescribirlo. Toca una foto para cambiarla o borrarla, o arrastra una foto de tu
+              dispositivo directamente encima de ella.
             </div>
           )}
 
           <StoreFrame
-            html={liveHtml ?? snapshot.html}
+            html={(editing ? stableHtml : liveHtml) ?? snapshot.html}
             title={snapshot.title}
             shopify={snapshot.shopify}
             domain={snapshot.domain}
@@ -656,11 +688,29 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
           <div className="rounded-2xl border border-border bg-surface p-4">
             <h3 className="flex items-center gap-2 text-base font-semibold text-text">
               <Sparkles className="h-4 w-4 text-accent2" /> Pide cambios por chat
+              {appliedCount > 0 && (
+                <span className="ml-auto rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                  {appliedCount} cambios aplicados
+                </span>
+              )}
             </h3>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => doChat(s)}
+                  disabled={chatLoading}
+                  className="rounded-full border border-accent2/30 bg-accent2/5 px-3 py-1 text-[11px] font-medium text-accent2 transition-colors hover:bg-accent2/15 disabled:opacity-40"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
             <div className="mt-3 flex max-h-56 flex-col gap-2 overflow-y-auto">
               {chatMsgs.length === 0 && (
                 <p className="text-xs text-faint">
-                  Ej: «cambia el titular por Hola Mundo», «pon el botón en rojo», «quita el banner de cookies»…
+                  Descríbeme el cambio que quieras y lo aplico al momento: textos, colores, fotos, secciones…
                 </p>
               )}
               {chatMsgs.map((m, i) => (
