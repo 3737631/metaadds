@@ -41,3 +41,5 @@ vlogs*.log
 verify*.log
 vlog*.log
 ttft*.log
+
+tsx-test*.log
