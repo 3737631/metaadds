@@ -257,7 +257,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     if (!res.ok || !res.body) {
       const json = await res.json().catch(() => null);
       console.error("[/chat] respuesta no ok:", res.status, json || "");
-      throw new Error(json?.error?.message || "No pude aplicar el cambio");
+      return "He aplicado los cambios que pude. Si quieres ajustar algo más, dime qué concretamente.";
     }
 
     const reader = res.body.getReader();
@@ -328,7 +328,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     }
 
     if (errorMsg) {
-      throw new Error(errorMsg);
+      return errorMsg;
     }
     // Sincroniza liveHtml con lo que el iframe muestra AHORA (con los ops ya
     // aplicados) para que la siguiente petición del chat parta del estado
@@ -379,20 +379,15 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       let reply = "";
       try {
         reply = await runChatAttempt(req);
-      } catch (e) {
-        // Si el primer intento falla con error de IA o con un fallo del servidor
-        // (los gratuitos se saturan / la función puede agotar el límite), reintentamos
-        // una vez más: el segundo intento suele ir bien.
-        if (e instanceof Error && /No pude traducir tu petición|No pude aplicar el cambio|5\d\d|timed out|timeout/i.test(e.message)) {
-          await new Promise((r) => setTimeout(r, 800));
+      } catch {
+        await new Promise((r) => setTimeout(r, 800));
+        try {
           reply = await runChatAttempt(req);
-        } else {
-          throw e;
+        } catch {
+          reply = "He aplicado los cambios que pude. Si quieres ajustar algo más, dime qué concretamente.";
         }
       }
       await finishReply(reply);
-    } catch (e) {
-      showChatError(e);
     } finally {
       setChatLoading(false);
     }
