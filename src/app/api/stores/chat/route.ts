@@ -1,5 +1,12 @@
 import { buildSnapshot } from "@/lib/stores/snapshot";
-import { chatEditStoreStream, deterministicFallback, type ChatOp } from "@/lib/stores/chat";
+import {
+  chatEditStoreStream,
+  deterministicFallback,
+  isLanguageChange,
+  detectTargetLang,
+  translateWebToLanguage,
+  type ChatOp,
+} from "@/lib/stores/chat";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -75,6 +82,31 @@ export async function POST(req: Request) {
         replied = true;
         send({ type: "reply", text });
       };
+
+      // Cambios de idioma: se traducen TODOS los textos visibles de una vez con
+      // un único call (rápido y fiable). Nunca deja sin respuesta ni da error.
+      if (isLanguageChange(request)) {
+        const target = detectTargetLang(request) || "en";
+        if (target === "es") {
+          sendOps([]);
+          sendReply("Tu tienda ya está en español. Dime a qué idioma quieres pasarla: inglés, francés, alemán, portugués o italiano.");
+          send({ type: "done", provider: undefined, model: undefined });
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+          return;
+        }
+        const tr = await translateWebToLanguage({ html: snapshotHtml, target });
+        if (tr.ops.length > 0) {
+          sendOps(tr.ops);
+          sendReply(tr.reply);
+          console.error(`[/api/stores/chat] traducción al ${target}: ${tr.ops.length} ops`);
+          send({ type: "done", provider: undefined, model: undefined });
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+          return;
+        }
+        // Si la IA no respondió seguimos con el flujo normal (stream IA + glosario).
+      }
 
       // Intérprete integrado: cubre las peticiones más habituales (colores,
       // tamaños, alineación, ocultar bloques, renombrar textos...) y SIEMPRE

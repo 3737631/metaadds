@@ -330,6 +330,10 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     if (errorMsg) {
       throw new Error(errorMsg);
     }
+    // Sincroniza liveHtml con lo que el iframe muestra AHORA (con los ops ya
+    // aplicados) para que la siguiente petición del chat parta del estado
+    // actual y no del html original.
+    window.setTimeout(() => chatStateRef.current?.(), 60);
     return reply;
   }
 

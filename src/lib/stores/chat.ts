@@ -459,7 +459,7 @@ const GLOSSARY_ES_EN: Record<string, string> = {
 };
 
 /** Detecta si el usuario pide cambiar el idioma de la web (necesita más tokens y ops replaceByText). */
-function isLanguageChange(request: string): boolean {
+export function isLanguageChange(request: string): boolean {
   const r = request.toLowerCase();
   return (
     /\bingl[ée]s\b/.test(r) ||
@@ -475,8 +475,105 @@ function isLanguageChange(request: string): boolean {
     /\ben espa[ñn]ol\b/.test(r) ||
     /\bin spanish\b/.test(r) ||
     /\bin english\b/.test(r) ||
-    /idioma de la web|idioma de la p[aá]gina|cambiar el idioma/.test(r)
+    /\bcambia(r)? el idioma\b/.test(r) ||
+    /idioma de la web|idioma de la p[aá]gina|idioma de la tienda/.test(r)
   );
+}
+
+const LANG_NAMES: Record<string, string> = {
+  en: "inglés",
+  fr: "francés",
+  de: "alemán",
+  pt: "portugués",
+  it: "italiano",
+  es: "español",
+};
+
+/** Detecta el idioma de destino en una petición ("otro idioma" → null; el caller elige el defecto). */
+export function detectTargetLang(request: string): string | null {
+  const r = request.toLowerCase();
+  if (/\bespa[ñn]ol\b|\bcastellano\b|en espa[ñn]ol|\bto spanish\b|\bspanish\b/.test(r)) return "es";
+  if (/\bingl[ée]s\b|\benglish\b|in english|\bto english\b/.test(r)) return "en";
+  if (/\bfranc[ée]s\b|\bfrançais\b|\bfrench\b/.test(r)) return "fr";
+  if (/\bportugu[ée]s\b|\bportuguês\b|\bportuguese\b|\bbrazilian\b/.test(r)) return "pt";
+  if (/\bitaliano\b|\bitalian\b|\bitaliana\b/.test(r)) return "it";
+  if (/\balem[aá]n\b|\bgerman\b|\balemana\b/.test(r)) return "de";
+  return null;
+}
+
+/**
+ * Traduce TODOS los textos visibles de la web al idioma pedido "de una vez":
+ * lanza un único call a la IA para traducir los textos extraídos (hasta 80) y
+ * aplica un replaceByText por cada pareja. Si la IA no responde, cae a un
+ * glosario determinista (ES→EN). Nunca lanza: si no hay nada que traducir
+ * devuelve ops vacíos y deja que el caller responda con ayuda constructiva.
+ */
+export async function translateWebToLanguage(opts: {
+  html: string;
+  target: string;
+}): Promise<{ ops: ChatOp[]; reply: string }> {
+  const to = LANG_NAMES[opts.target] || LANG_NAMES.en;
+  const texts = extractVisibleTexts(opts.html, 120)
+    .map((t) => t.replace(/\s+/g, " ").trim())
+    .filter((t) => t.length > 1)
+    .slice(0, 80);
+  if (!texts.length) return { ops: [], reply: "" };
+
+  const service = getAIService();
+  if (service.available) {
+    try {
+      const result = await Promise.race([
+        service.generate({
+          systemPrompt: `Eres un traductor de tiendas online al ${to}. Responde SOLO con un JSON Array de objetos, sin texto fuera: [{"t":"TEXTO ORIGINAL EXACTO","v":"traducción al ${to}"}]. Traduce TODOS los textos de la lista. Usa en "t" el texto original copiado EXACTAMENTE (sin quitar ni cambiar nada). No traduzcas un texto que ya esté en ${to}; omítelo.`,
+          userPrompt: JSON.stringify(texts),
+          responseFormat: "json",
+          temperature: 0.2,
+          maxTokens: 4096,
+        }),
+        new Promise<null>((res) => setTimeout(() => res(null), 30_000)),
+      ]);
+      if (result) {
+        const json = repairJson(result.content);
+        const arr = Array.isArray(json)
+          ? json
+          : Array.isArray((json as any)?.pairs)
+            ? (json as any).pairs
+            : Array.isArray((json as any)?.translations)
+              ? (json as any).translations
+              : [];
+        const seen = new Set<string>();
+        const ops: ChatOp[] = [];
+        for (const it of arr) {
+          const from = String(it?.t ?? it?.text ?? it?.original ?? "").trim();
+          const val = String(it?.v ?? it?.translation ?? it?.value ?? "").trim();
+          if (!from || !val || seen.has(from) || normSp(from) === normSp(val)) continue;
+          seen.add(from);
+          ops.push({ op: "replaceByText", text: from, newText: val });
+        }
+        if (ops.length) {
+          return {
+            ops,
+            reply: `He traducido todos los textos visibles de la tienda al ${to} (${ops.length} cambios aplicados). Revisa la vista previa y dime si quieres ajustar algo.`,
+          };
+        }
+      }
+    } catch {
+      /* la IA falló: usamos el glosario de reserva */
+    }
+  }
+
+  // Reserva determinista (ES→EN): cubre los rótulos UI habituales aunque la IA falle.
+  if (opts.target === "en") {
+    const ops: ChatOp[] = [];
+    for (const t of texts) {
+      const en = GLOSSARY_ES_EN[normSp(t)];
+      if (en && normSp(en) !== normSp(t)) ops.push({ op: "replaceByText", text: t, newText: en });
+    }
+    if (ops.length) {
+      return { ops, reply: `He traducido ${ops.length} textos al inglés con el traductor integrado.` };
+    }
+  }
+  return { ops: [], reply: "" };
 }
 
 /** Extrae el <body> (y algo del <head> para clases globales) sin scripts pesados. */
