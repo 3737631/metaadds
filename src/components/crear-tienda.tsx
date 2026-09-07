@@ -64,6 +64,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   const [editingPending, setEditingPending] = useState(false);
   const editTargetRef = useRef<boolean | null>(null);
   const [streamingReply, setStreamingReply] = useState<string | null>(null);
+  const [typingActive, setTypingActive] = useState(false);
   const typewriterRef = useRef<number | null>(null);
 
   function flash(msg: string) {
@@ -191,6 +192,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
   function showStreamingReply(full: string) {
     if (typewriterRef.current) window.clearInterval(typewriterRef.current);
     setStreamingReply("");
+    setTypingActive(true);
     const words = full.split(" ");
     let idx = 0;
     typewriterRef.current = window.setInterval(() => {
@@ -199,6 +201,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       if (idx >= words.length && typewriterRef.current) {
         window.clearInterval(typewriterRef.current);
         typewriterRef.current = null;
+        setTypingActive(false);
       }
     }, 45);
   }
@@ -208,8 +211,128 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       window.clearInterval(typewriterRef.current);
       typewriterRef.current = null;
     }
+    setTypingActive(false);
     setStreamingReply(null);
     setChatMsgs((prev) => [...prev, { role: "ai", text: full || fallback }]);
+  }
+
+  // Ejecuta una petición al chat (aplica ops en vivo y streama la respuesta).
+  // Devuelve el texto de respuesta del modelo (puede ser ""). Lanza Error si falla.
+  async function runChatAttempt(req: string): Promise<string> {
+    let reply = "";
+    const chatSelected = selected;
+    if (!chatSelected) throw new Error("No hay tienda seleccionada");
+    const res = await fetch("/api/stores/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: chatSelected.url, request: req, html: liveHtml ?? snapshot?.html ?? "" }),
+    });
+
+    if (!res.ok || !res.body) {
+      const json = await res.json().catch(() => null);
+      throw new Error(json?.error?.message || "No pude aplicar el cambio");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuf = "";
+    let errorMsg: string | null = null;
+    let gotDone = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuf += decoder.decode(value, { stream: true });
+
+      let sep: number;
+      while ((sep = sseBuf.indexOf("\n\n")) >= 0) {
+        const event = sseBuf.slice(0, sep).trim();
+        sseBuf = sseBuf.slice(sep + 2);
+        if (!event.startsWith("data:")) continue;
+        const payload = event.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        let data: any;
+        try {
+          data = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (data.type === "ops" && Array.isArray(data.ops)) {
+          for (const op of data.ops) {
+            if (chatOpsRef.current) chatOpsRef.current([op]);
+          }
+          setAppliedCount((c) => c + data.ops.length);
+        } else if (data.type === "reply" && typeof data.text === "string") {
+          reply = data.text;
+          showStreamingReply(data.text);
+        } else if (data.type === "done") {
+          gotDone = true;
+          // Si el modelo terminó pero no escribió texto de respuesta, fijamos
+          // el mensaje final para que el estado "Aplicando cambios…" no cuelgue.
+          if (!reply && !streamingReply) {
+            commitReply(reply, "He aplicado tus cambios.");
+          }
+        } else if (data.type === "error" && typeof data.message === "string") {
+          errorMsg = data.message;
+        }
+      }
+    }
+    // Limpieza final del buffer SSE sobrante.
+    if (sseBuf.trim().startsWith("data:")) {
+      const payload = sseBuf.slice(5).trim();
+      if (payload && payload !== "[DONE]") {
+        try {
+          const data = JSON.parse(payload);
+          if (data.type === "reply" && typeof data.text === "string" && !reply) {
+            reply = data.text;
+            showStreamingReply(data.text);
+          } else if (data.type === "error" && typeof data.message === "string") {
+            errorMsg = data.message;
+          }
+        } catch {
+          /* noop */
+        }
+      }
+    }
+
+    if (!gotDone && !errorMsg) {
+      // Servidor cerró sin evento done: tratamos como éxito silencioso.
+      gotDone = true;
+    }
+
+    if (errorMsg) {
+      throw new Error(errorMsg);
+    }
+    return reply;
+  }
+
+  // Espera a que termine el efecto tecleo y fija el mensaje final.
+  async function finishReply(reply: string) {
+    await new Promise<void>((resolve) => {
+      let waited = 0;
+      const wait = () => {
+        if (!typewriterRef.current || waited >= 5000) {
+          resolve();
+        } else {
+          waited += 100;
+          setTimeout(wait, 100);
+        }
+      };
+      wait();
+    });
+    commitReply(reply, "He aplicado tus cambios.");
+  }
+
+  function showChatError(e: unknown) {
+    if (typewriterRef.current) {
+      window.clearInterval(typewriterRef.current);
+      typewriterRef.current = null;
+    }
+    setTypingActive(false);
+    setStreamingReply(null);
+    const msg = e instanceof Error && e.message ? e.message : "No pude aplicar tu petición. Inténtalo de nuevo.";
+    setError(msg);
+    setChatMsgs((prev) => [...prev, { role: "sys", text: msg }]);
   }
 
   async function doChat(text: string) {
@@ -221,110 +344,23 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     setAppliedCount(0);
     setError(null);
 
-    let reply = "";
     try {
-      const res = await fetch("/api/stores/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: selected.url, request: req, html: liveHtml ?? snapshot?.html ?? "" }),
-      });
-
-      if (!res.ok || !res.body) {
-        const json = await res.json().catch(() => null);
-        throw new Error(json?.error?.message || "No pude aplicar el cambio");
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let sseBuf = "";
-      let errorMsg: string | null = null;
-      let gotDone = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        sseBuf += decoder.decode(value, { stream: true });
-
-        let sep: number;
-        while ((sep = sseBuf.indexOf("\n\n")) >= 0) {
-          const event = sseBuf.slice(0, sep).trim();
-          sseBuf = sseBuf.slice(sep + 2);
-          if (!event.startsWith("data:")) continue;
-          const payload = event.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
-          let data: any;
-          try {
-            data = JSON.parse(payload);
-          } catch {
-            continue;
-          }
-          if (data.type === "ops" && Array.isArray(data.ops)) {
-            for (const op of data.ops) {
-              if (chatOpsRef.current) chatOpsRef.current([op]);
-            }
-            setAppliedCount((c) => c + data.ops.length);
-          } else if (data.type === "reply" && typeof data.text === "string") {
-            reply = data.text;
-            showStreamingReply(data.text);
-          } else if (data.type === "done") {
-            gotDone = true;
-            // Si el modelo terminó pero no escribió texto de respuesta, fijamos
-            // el mensaje final para que el estado "Aplicando cambios…" no cuelgue.
-            if (!reply && !streamingReply) {
-              commitReply(reply, "He aplicado tus cambios.");
-            }
-          } else if (data.type === "error" && typeof data.message === "string") {
-            errorMsg = data.message;
-          }
+      let reply = "";
+      try {
+        reply = await runChatAttempt(req);
+      } catch (e) {
+        // Si el primer intento falla con error de IA, reintentamos una vez más:
+        // los modelos gratuitos se saturan a veces y el segundo intento suele ir bien.
+        if (e instanceof Error && /No pude traducir tu petición/.test(e.message)) {
+          await new Promise((r) => setTimeout(r, 800));
+          reply = await runChatAttempt(req);
+        } else {
+          throw e;
         }
       }
-      // Limpieza final del buffer SSE sobrante.
-      if (sseBuf.trim().startsWith("data:")) {
-        const payload = sseBuf.slice(5).trim();
-        if (payload && payload !== "[DONE]") {
-          try {
-            const data = JSON.parse(payload);
-            if (data.type === "reply" && typeof data.text === "string" && !reply) {
-              reply = data.text;
-              showStreamingReply(data.text);
-            } else if (data.type === "error" && typeof data.message === "string") {
-              errorMsg = data.message;
-            }
-          } catch {
-            /* noop */
-          }
-        }
-      }
-
-      if (!gotDone && !errorMsg) {
-        // Servidor cerró sin evento done: tratamos como éxito silencioso.
-        gotDone = true;
-      }
-
-      if (errorMsg) {
-        throw new Error(errorMsg);
-      }
-
-      // Espera a que termine el tecleo antes de fijar el mensaje final.
-      await new Promise<void>((resolve) => {
-        const wait = () => {
-          if (!typewriterRef.current) {
-            resolve();
-          } else {
-            setTimeout(wait, 60);
-          }
-        };
-        wait();
-      });
-      commitReply(reply, "He aplicado tus cambios.");
+      await finishReply(reply);
     } catch (e) {
-      if (typewriterRef.current) {
-        window.clearInterval(typewriterRef.current);
-        typewriterRef.current = null;
-      }
-      setStreamingReply(null);
-      setError(e instanceof Error ? e.message : "Error al aplicar el cambio");
-      setChatMsgs((prev) => [...prev, { role: "sys", text: e instanceof Error && e.message ? e.message : "No pude aplicar tu petición. Inténtalo de nuevo." }]);
+      showChatError(e);
     } finally {
       setChatLoading(false);
     }
@@ -636,7 +672,9 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
               {streamingReply !== null && (
                 <div className="self-start max-w-[85%] rounded-xl bg-surface-2 px-3 py-2 text-sm text-dim">
                   {streamingReply}
-                  <span className="ml-0.5 inline-block animate-pulse">▌</span>
+                  {typingActive && (
+                    <span className="ml-0.5 inline-block animate-pulse">▌</span>
+                  )}
                 </div>
               )}
               {chatLoading && streamingReply === null && (

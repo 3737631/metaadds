@@ -143,6 +143,75 @@ const EDITOR_SCRIPT = `
  * para que el usuario pueda pedir cambios por chat sin entrar en modo edición.
  * Escucha mensajes del padre {type:'apply-ops', ops: ChatOp[]} y los aplica en vivo.
  */
+/**
+ * Bootstrap silencioso. Se inyecta MUY pronto (justo tras <head>) para que ejecute
+ * ANTES que los scripts del tema de la tienda. Su objetivo es silenciar los errores
+ * de consola típicos del entorno aislado (sandbox sin allow-same-origin) que NO
+ * afectan a la vista previa:
+ *   - Acceso a document.cookie (el sandbox lo bloquea al no poder leer la cookie).
+ *   - Peticiones del tema a endpoints de carrito/analytics (fallan por CORS aquí).
+ *   - Avisos/errores internos del tema (storefrontBaseUrl "null", etc).
+ * En la vista previa queremos un iframe limpio: sin errores en F12.
+ */
+const QUIET_SCRIPT = `
+(function () {
+  try {
+    var noisy = /storefrontBaseUrl|Access-Control-Allow-Origin|Failed to load resource|net::ERR_FAILED|cookie|removeAttr|\\/api\\/collect|\\/cart\\.js|\\/services\\/javascripts|\\/conversion\\.js|shopifysvc\\.com|otlp|\\/v1\\/metrics|\\/v1\\/logs|preflight|The document is sandboxed/i;
+    var oErr = console.error.bind(console);
+    var oWarn = console.warn.bind(console);
+    console.error = function () {
+      for (var i = 0; i < arguments.length; i++) {
+        var a = arguments[i];
+        try { if (noisy.test(String(a && a.message !== undefined ? a.message : a))) return; } catch (e) {}
+      }
+      return oErr.apply(console, arguments);
+    };
+    console.warn = function () {
+      for (var i = 0; i < arguments.length; i++) {
+        var a = arguments[i];
+        try { if (noisy.test(String(a && a.message !== undefined ? a.message : a))) return; } catch (e) {}
+      }
+      return oWarn.apply(console, arguments);
+    };
+    window.addEventListener('error', function (e) {
+      try { if (e && e.error && noisy.test(String(e.error && e.error.message ? e.error.message : e.error))) { e.stopImmediatePropagation(); e.preventDefault(); } } catch (x) {}
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+      try { if (e && e.reason && noisy.test(String(e.reason && e.reason.message ? e.reason.message : e.reason))) { e.preventDefault(); } } catch (x) {}
+    }, true);
+    var _fetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      var u = typeof input === 'string' ? input : (input && input.url) || '';
+      if (/\\/api\\/collect|\\/cart\\.js|\\/services\\/javascripts|\\/conversion\\.js|shopifysvc\\.com|otlp-http|\\/v1\\/metrics|\\/v1\\/logs/i.test(u)) {
+        return Promise.resolve(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return _fetch(input, init);
+    };
+    var beaconUrls = /shopifysvc\\.com|otlp-http|\\/v1\\/metrics|\\/v1\\/logs|\\/api\\/collect|\\/cart\\.js|\\/services\\/javascripts|\\/conversion\\.js/i;
+    if (navigator && navigator.sendBeacon) {
+      var _beacon = navigator.sendBeacon.bind(navigator);
+      navigator.sendBeacon = function (url, data) {
+        try { if (beaconUrls.test(String(url))) return true; } catch (e) {}
+        return _beacon.apply(this, arguments);
+      };
+    }
+    try {
+      var _xopen = XMLHttpRequest.prototype.open;
+      var _xsend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        try { this.__qurl = String(url); } catch (e) {}
+        return _xopen.apply(this, arguments);
+      };
+      XMLHttpRequest.prototype.send = function (body) {
+        try { if (beaconUrls.test(String(this.__qurl || ''))) return; } catch (e) {}
+        return _xsend.apply(this, arguments);
+      };
+    } catch (e) {}
+    try { Object.defineProperty(document, 'cookie', { configurable: true, get: function () { return ''; }, set: function () {} }); } catch (e) {}
+  } catch (e) {}
+})();
+`;
+
 const OPS_RECEIVER = `
 (function () {
   var apply = function (op) {
@@ -351,18 +420,27 @@ export default function StoreFrame({
   const editableSrc = useMemo(() => {
     // Siempre inyectamos el receptor de operaciones del chatbot para poder aplicar
     // cambios por chat aunque no estemos en modo edición.
-    const idx = html.lastIndexOf("</body>");
-    if (idx === -1) return html;
+    if (html.indexOf("</body>") === -1) return html;
+    // El bootstrap silencioso se inserta justo tras <head> para que corra ANTES de los
+    // scripts del tema (así silencia sus errores de consola del entorno aislado).
+    const headIdx = html.indexOf("<head>");
+    const quietInjected =
+      headIdx !== -1
+        ? html.slice(0, headIdx + "<head>".length) +
+          '<script id="__meta_quiet">' + QUIET_SCRIPT + "</script>" +
+          html.slice(headIdx + "<head>".length)
+        : html;
+    const bidx = quietInjected.lastIndexOf("</body>");
     // Concatenación simple (no template literal) para obtener un `</script>` REAL que
     // cierre la etiqueta en el srcdoc; un `<\/script>` escapado dejaría el <script>
     // abierto y el parser se tragaría el resto del HTML.
     const receiver = '<script id="__meta_ops">' + OPS_RECEIVER + "</script>";
     if (!editMode) {
-      return html.slice(0, idx) + receiver + html.slice(idx);
+      return quietInjected.slice(0, bidx) + receiver + quietInjected.slice(bidx);
     }
     // En modo edición añadimos además el editor click-to-edit.
     const editor = '<script id="__meta_editor">' + EDITOR_SCRIPT + "</script>";
-    return html.slice(0, idx) + receiver + editor + html.slice(idx);
+    return quietInjected.slice(0, bidx) + receiver + editor + quietInjected.slice(bidx);
   }, [html, editMode]);
 
   const scale = width > 0 ? width / BASE_WIDTH : 1;
