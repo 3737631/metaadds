@@ -77,11 +77,26 @@ export interface SafeFetchResult {
 }
 
 const MAX_REDIRECTS = 4;
-const TIMEOUT_MS = 15000;
-const MAX_BYTES = 2_500_000; // ~2.5 MB de HTML
+const TIMEOUT_MS = 25000;
+const MAX_BYTES = 8_000_000; // ~8 MB de HTML (webs grandes con mucho markup inline)
 
 const ASSET_TIMEOUT_MS = 10000;
 const ASSET_MAX_BYTES = 1_500_000; // 1.5 MB por recurso CSS
+
+/** User-agents de navegador reales (rotados entre intentos): algunos sitios bloquean bots. */
+const BROWSER_UAS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+];
+
+function looksLikeHtml(body: string): boolean {
+  return /^[\s\uFEFF]*(<!doctype\s+html|<html|<!–)/i.test(body) || body.includes("<head");
+}
+
+/** Devuelve un User-Agent realista según un índice. */
+function browserUa(index: number): string {
+  return BROWSER_UAS[index % BROWSER_UAS.length];
+}
 
 /**
  * Fetch seguro para recursos (CSS/JS/HTML genérico) con límites y SSRF.
@@ -127,7 +142,7 @@ export async function safeFetchBytes(rawUrl: string): Promise<Buffer | null> {
   }
 }
 
-async function safeFetchHtmlOnce(rawUrl: string): Promise<SafeFetchResult | null> {
+async function safeFetchHtmlOnce(rawUrl: string, ua: string): Promise<SafeFetchResult | null> {
   const start = await resolveSafeUrl(rawUrl);
   if (!start) return null;
 
@@ -142,7 +157,7 @@ async function safeFetchHtmlOnce(rawUrl: string): Promise<SafeFetchResult | null
       const res = await fetch(current.toString(), {
         redirect: "manual",
         signal: controller.signal,
-        headers: { "user-agent": "Mozilla/5.0 (compatible; MetaWinnersBot/1.0)" },
+        headers: { "user-agent": ua },
       });
 
       if (res.status >= 300 && res.status < 400) {
@@ -156,10 +171,7 @@ async function safeFetchHtmlOnce(rawUrl: string): Promise<SafeFetchResult | null
       }
 
       const contentType = res.headers.get("content-type") ?? "";
-      if (
-        res.status !== 200 ||
-        (!contentType.includes("text/html") && !contentType.includes("text/plain"))
-      ) {
+      if (res.status !== 200) {
         return {
           ok: false,
           status: res.status,
@@ -169,10 +181,16 @@ async function safeFetchHtmlOnce(rawUrl: string): Promise<SafeFetchResult | null
           html: "",
         };
       }
-
       const buf = Buffer.from(await res.arrayBuffer());
+      const text = buf.toString("utf8");
       if (buf.length > MAX_BYTES) {
         return { ok: false, status: res.status, finalUrl: current.toString(), finalHost: current.hostname, contentType, html: "" };
+      }
+      if (!contentType.includes("text/html") && !contentType.includes("text/plain") && !contentType.includes("xhtml")) {
+        // Si el servidor no manda un content-type HTML pero el cuerpo lo es, lo aceptamos igual.
+        if (!looksLikeHtml(text)) {
+          return { ok: false, status: res.status, finalUrl: current.toString(), finalHost: current.hostname, contentType, html: "" };
+        }
       }
 
       return {
@@ -181,7 +199,7 @@ async function safeFetchHtmlOnce(rawUrl: string): Promise<SafeFetchResult | null
         finalUrl: current.toString(),
         finalHost: current.hostname,
         contentType,
-        html: buf.toString("utf8"),
+        html: text,
       };
     }
   } catch {
@@ -208,9 +226,9 @@ export async function safeFetchHtml(rawUrl: string): Promise<SafeFetchResult | n
   }
 
   let last: SafeFetchResult | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     for (const candidate of candidates) {
-      const res = await safeFetchHtmlOnce(candidate);
+      const res = await safeFetchHtmlOnce(candidate, browserUa(attempt));
       if (!res) continue;
       last = res;
       if (res.ok) return res;

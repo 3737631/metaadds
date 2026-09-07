@@ -161,18 +161,25 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
     editTargetRef.current = null;
     try {
       // Miniatura fiel (HTML+CSS reales) + réplica (para descargar/subir tema).
-      const [snapRes, reproRes] = await Promise.all([
-        fetch("/api/stores/snapshot", {
+      let snapRes = await fetch("/api/stores/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: c.url }),
+      });
+      if (!snapRes.ok) {
+        // Fallos puntuales de conexión/snapshot: reintentamos una vez antes de rendirnos.
+        await new Promise((r) => setTimeout(r, 700));
+        snapRes = await fetch("/api/stores/snapshot", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: c.url }),
-        }),
-        fetch("/api/stores/replica", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: c.url }),
-        }),
-      ]);
+        });
+      }
+      const reproRes = await fetch("/api/stores/replica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: c.url }),
+      });
       const [snapJson, reproJson] = await Promise.all([
         snapRes.json(),
         reproRes.json(),

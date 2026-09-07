@@ -2,6 +2,7 @@ import { buildSnapshot } from "@/lib/stores/snapshot";
 import { chatEditStoreStream, type ChatOp } from "@/lib/stores/chat";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 function sse(json: unknown): string {
   return `data: ${JSON.stringify(json)}\n\n`;

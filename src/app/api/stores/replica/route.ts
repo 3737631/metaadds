@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildReplica } from "@/lib/stores/replica";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   try {

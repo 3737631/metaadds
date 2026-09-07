@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildSnapshot } from "@/lib/stores/snapshot";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   try {
