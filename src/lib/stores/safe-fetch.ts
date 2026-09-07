@@ -127,7 +127,7 @@ export async function safeFetchBytes(rawUrl: string): Promise<Buffer | null> {
   }
 }
 
-export async function safeFetchHtml(rawUrl: string): Promise<SafeFetchResult | null> {
+async function safeFetchHtmlOnce(rawUrl: string): Promise<SafeFetchResult | null> {
   const start = await resolveSafeUrl(rawUrl);
   if (!start) return null;
 
@@ -189,6 +189,34 @@ export async function safeFetchHtml(rawUrl: string): Promise<SafeFetchResult | n
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Captura el HTML con resiliencia a conexiones intermitentes: reintenta hasta
+ * un par de veces y, si la variante https falla, pruebo el mismo host por http.
+ * Así un "connection refused" puntual del sitio no tumba la apertura de la tienda.
+ */
+export async function safeFetchHtml(rawUrl: string): Promise<SafeFetchResult | null> {
+  const base = await resolveSafeUrl(rawUrl);
+  if (!base) return null;
+
+  const candidates: string[] = [base.toString()];
+  if (base.protocol === "https:") {
+    const httpVariant = new URL(base.toString());
+    httpVariant.protocol = "http:";
+    candidates.push(httpVariant.toString());
+  }
+
+  let last: SafeFetchResult | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const candidate of candidates) {
+      const res = await safeFetchHtmlOnce(candidate);
+      if (!res) continue;
+      last = res;
+      if (res.ok) return res;
+    }
+  }
+  return last;
 }
 
 /** Extrae etiquetas <title> desde HTML crudo. */

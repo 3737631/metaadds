@@ -214,39 +214,58 @@ const OPS_RECEIVER = `
       return { ok: false, selector: op && op.selector, err: String(e) };
     }
   };
+// Evita que el iframe NAVEgue al sitio real al hacer clic en un enlace (o el
+  // navegador mostraría dentro del editor la página nativa de "conexión rechazada"
+  // y se perdería la vista editable). Los anclajes internos (#) se dejan pasar.
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('a') : null;
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (!/^https?:/i.test(href)) return;
+    try {
+      var host = new URL(href, document.baseURI).hostname;
+      if (host && host !== (location.hostname || '#')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    } catch (ex) {}
+  }, true);
+
   window.addEventListener('message', function (e) {
     var d = e.data;
-    if (!d || d.type !== 'apply-ops') return;
-    var ops = Array.isArray(d.ops) ? d.ops : [];
-    var applied = 0, failed = 0;
-    ops.forEach(function (op) {
-      var r = apply(op);
-      if (r && r.ok) applied++; else failed++;
-    });
-    if (parent && parent !== window) {
-      parent.postMessage({ type: 'ops-applied', applied: applied, failed: failed }, '*');
+    if (!d) return;
+    // Aplicar operaciones del chatbot.
+    if (d.type === 'apply-ops' && Array.isArray(d.ops)) {
+      var ops = d.ops;
+      var applied = 0, failed = 0;
+      ops.forEach(function (op) {
+        var r = apply(op);
+        if (r && r.ok) applied++; else failed++;
+      });
+      if (parent && parent !== window) {
+        parent.postMessage({ type: 'ops-applied', applied: applied, failed: failed }, '*');
+      }
+      return;
     }
-  });
-  window.addEventListener('message', function (e) {
-    var d = e.data;
-    if (!d || d.type !== 'request-state') return;
-    // Limpia los artefactos inyectados para que la serialización sea reutilizable.
-    ['__meta_ops', '__meta_editor'].forEach(function (id) {
-      var s = document.getElementById(id);
-      if (s && s.parentNode) s.parentNode.removeChild(s);
-    });
-    var banner = document.querySelector('.ed-banner');
-    if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
-    var tagged = document.querySelectorAll('[data-eid], [data-edit], [contenteditable], [__ED__]');
-    for (var ti = 0; ti < tagged.length; ti++) {
-      var el = tagged[ti];
-      el.removeAttribute('data-eid');
-      el.removeAttribute('data-edit');
-      el.removeAttribute('contenteditable');
-      el.removeAttribute('__ED__');
-    }
-    if (parent && parent !== window) {
-      parent.postMessage({ type: 'iframe-state', html: document.documentElement.outerHTML }, '*');
+    // Serializar el DOM modificado para que el padre lo reutilice al cambiar de modo.
+    if (d.type === 'request-state') {
+      ['__meta_ops', '__meta_editor'].forEach(function (id) {
+        var s = document.getElementById(id);
+        if (s && s.parentNode) s.parentNode.removeChild(s);
+      });
+      var banner = document.querySelector('.ed-banner');
+      if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+      var tagged = document.querySelectorAll('[data-eid], [data-edit], [contenteditable], [__ED__]');
+      for (var ti = 0; ti < tagged.length; ti++) {
+        var el = tagged[ti];
+        el.removeAttribute('data-eid');
+        el.removeAttribute('data-edit');
+        el.removeAttribute('contenteditable');
+        el.removeAttribute('__ED__');
+      }
+      if (parent && parent !== window) {
+        parent.postMessage({ type: 'iframe-state', html: document.documentElement.outerHTML }, '*');
+      }
     }
   });
 })();
