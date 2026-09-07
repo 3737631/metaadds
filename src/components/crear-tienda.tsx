@@ -237,6 +237,7 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
 
     if (!res.ok || !res.body) {
       const json = await res.json().catch(() => null);
+      console.error("[/chat] respuesta no ok:", res.status, json || "");
       throw new Error(json?.error?.message || "No pude aplicar el cambio");
     }
 
@@ -356,9 +357,10 @@ export default function CrearTienda({ categories }: { categories: Category[] }) 
       try {
         reply = await runChatAttempt(req);
       } catch (e) {
-        // Si el primer intento falla con error de IA, reintentamos una vez más:
-        // los modelos gratuitos se saturan a veces y el segundo intento suele ir bien.
-        if (e instanceof Error && /No pude traducir tu petición/.test(e.message)) {
+        // Si el primer intento falla con error de IA o con un fallo del servidor
+        // (los gratuitos se saturan / la función puede agotar el límite), reintentamos
+        // una vez más: el segundo intento suele ir bien.
+        if (e instanceof Error && /No pude traducir tu petición|No pude aplicar el cambio|5\d\d|timed out|timeout/i.test(e.message)) {
           await new Promise((r) => setTimeout(r, 800));
           reply = await runChatAttempt(req);
         } else {

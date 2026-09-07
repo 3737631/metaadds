@@ -1090,7 +1090,11 @@ export async function chatEditStoreStream(
       const pending = () => baseVisible.filter((t) => !covered.has(normSp(t)));
       let pend = pending();
       let pass = 0;
-      while (pend.length > 0 && pass < LANGUAGE_COVER_PASSES) {
+      // Presupuesto total para todas las pasadas: la función del servidor tiene un
+      // límite (Vercel 120s) y si lo superamos la respuesta se corta con un 504 y
+      // el usuario ve el feo error "No pude aplicar el cambio". Nunca pasamos de 50s.
+      const coverDeadline = Date.now() + 50_000;
+      while (pend.length > 0 && pass < LANGUAGE_COVER_PASSES && Date.now() < coverDeadline) {
         pass++;
         const pendList = pend.map((t, i) => `${i + 1}. ${t}`).join("\n");
         const followPrompt = `TENDA / DOMINIO: ${opts.domain}\n\nINSTRUCCIÓN DEL USUARIO: ${opts.request}\n\nQuedan estos textos de la web AÚN sin traducir. Devuelve SOLO las operaciones "replaceByText" para traducirlos TODOS al idioma pedido (no dejes ninguno). "text" = texto español exacto, "newText" = traducción.\n\nTEXTOS PENDIENTES:\n${pendList}\n\nDevuelve el JSON {"ops":[...]}.`;
