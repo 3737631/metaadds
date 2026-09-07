@@ -65,12 +65,31 @@ export async function POST(req: Request) {
       }
 
       let delivered = 0;
+      let replied = false;
       const sendOps = (ops: ChatOp[]) => {
         if (!ops.length) return;
         delivered += ops.length;
         send({ type: "ops", ops });
       };
-      const sendReply = (text: string) => send({ type: "reply", text });
+      const sendReply = (text: string) => {
+        replied = true;
+        send({ type: "reply", text });
+      };
+
+      // Intérprete integrado: cubre las peticiones más habituales (colores,
+      // tamaños, alineación, ocultar bloques, renombrar textos...) y SIEMPRE
+      // devuelve cambios reales. Si reconoce la petición, la aplica al instante
+      // (sin esperar a los proveedores de IA, que pueden tardar o fallar).
+      const fb = deterministicFallback({ html: snapshotHtml, request });
+      if (fb.ops.length > 0 && fb.kind !== "translate") {
+        sendOps(fb.ops);
+        if (fb.reply) sendReply(fb.reply);
+        console.error(`[/api/stores/chat] intérprete integrado aplicó ${fb.ops.length} ops (kind=${fb.kind})`);
+        send({ type: "done", provider: undefined, model: undefined });
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+        return;
+      }
 
       let provider: string | undefined;
       let model: string | undefined;
@@ -87,26 +106,25 @@ export async function POST(req: Request) {
         console.error("[/api/stores/chat]", err);
       }
 
-      console.error(`[/api/stores/chat] url=${url} request=${request.slice(0,40)} delivered=${delivered} provider=${provider} model=${model}`);
+      console.error(`[/api/stores/chat] url=${url} request=${request.slice(0, 40)} delivered=${delivered} provider=${provider} model=${model}`);
 
-      if (delivered === 0) {
-        // Último recurso: intérprete determinista para que los cambios sencillos
-        // SIEMPRE se apliquen aunque todos los proveedores de IA hayan fallado.
-        const fb = deterministicFallback({ html: snapshotHtml, request });
+      if (delivered === 0 && !replied) {
+        // Último recurso: el intérprete determinista para que los cambios
+        // sencillos SIEMPRE se apliquen aunque todos los proveedores fallen.
         if (fb.ops.length > 0) {
           sendOps(fb.ops);
           if (fb.reply) sendReply(fb.reply);
           console.error(`[/api/stores/chat] fallback determinista aplicó ${fb.ops.length} ops`);
         } else {
+          // Nunca mostramos un error: respondemos con una ayuda constructiva
+          // para que el cliente reformule y obtenga el cambio que quiere.
           send({
-            type: "error",
-            code: "AI_ERROR",
-            message: "No pude traducir tu petición en cambios concretos. Reformúlalo (ej: cambia el titular, cambia el color a rojo, quita el banner de cookies).",
+            type: "reply",
+            text: `No logré traducir «${request}» en cambios automáticos. Dime de forma sencilla qué quieres: «cambia el texto X por Y», «pon el botón en rojo/azul/verde», «haz el titular más grande», «centra el título», «quita el banner de cookies», «en mayúsculas», «modo oscuro»...`,
           });
         }
-      } else {
-        send({ type: "done", provider, model });
       }
+      send({ type: "done", provider, model });
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       controller.close();
     },

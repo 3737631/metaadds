@@ -1180,6 +1180,7 @@ function escSel(s: string): string {
 
 const COLORES_MAP: Record<string, string> = {
   rojo: "#e11d48",
+  roja: "#e11d48",
   azul: "#2563eb",
   verde: "#16a34a",
   negro: "#111827",
@@ -1192,6 +1193,21 @@ const COLORES_MAP: Record<string, string> = {
   marron: "#92400e",
   celeste: "#38bdf8",
   turquesa: "#14b8a6",
+  dorado: "#d4af37",
+  oro: "#d4af37",
+  plata: "#c0c0c0",
+  plateado: "#c0c0c0",
+  coral: "#ff7f50",
+  lila: "#b39ddb",
+  fucsia: "#d946ef",
+  magenta: "#d946ef",
+  lima: "#84cc16",
+  menta: "#34d399",
+  marino: "#1e3a8a",
+  oliva: "#808000",
+  vino: "#7f1d1d",
+  burdeos: "#7f1d1d",
+  mostaza: "#eab308",
 };
 
 /**
@@ -1201,9 +1217,11 @@ const COLORES_MAP: Record<string, string> = {
  * SIEMPRE se aplique y el usuario no vea "No pude aplicar el cambio".
  * Devuelve ops vacías si la petición no encaja (entonces se muestra el error).
  */
-export function deterministicFallback(opts: { html: string; request: string }): { ops: ChatOp[]; reply: string } {
+export function deterministicFallback(opts: { html: string; request: string }): { ops: ChatOp[]; reply: string; kind?: string } {
   const r = opts.request.toLowerCase().trim();
   const ops: ChatOp[] = [];
+  const titleish = /titul|heading|encabe|title/i;
+  const asi = /as[ií]|asi\b/i;
 
   // 1) Traducción de idioma. El glosario ES→EN es fiable; si el idioma pedido NO es
   // inglés (español/francés/...), el glosario no aplica y se devuelve sin ops.
@@ -1219,22 +1237,29 @@ export function deterministicFallback(opts: { html: string; request: string }): 
       return {
         ops,
         reply: `He traducido ${ops.length} textos con el traductor integrado (los proveedores de IA no respondieron). Revisa la web y pídeme lo que quieras ajustar.`,
+        kind: "translate",
       };
     }
   }
 
-  // 2) Color: "pon el botón en rojo", "cambia los titulares a azul", "fondo negro"...
+  // 2) Color: "pon el botón en rojo", "cambia los titulares a azul",
+  //    "el fondo negro", "la cabecera morada", "el pie verde"...
+  const noCmd = /^\s*(no|don'?t)\s+/i.test(opts.request);
   const colorNames = Object.keys(COLORES_MAP);
   const mColor = new RegExp("\\b(" + colorNames.join("|") + ")\\b", "i").exec(r);
-  if (mColor && /color|pintar|pon|ponle|cambia|cambiar|deja|fondo|background/i.test(r)) {
+  if (mColor && !noCmd && /color|pintar|pon|ponle|cambia|cambiar|deja|fondo|background|haz|de|en/i.test(r)) {
     const hex = COLORES_MAP[(mColor[1] || "").toLowerCase()];
     if (hex) {
-      let css = "";
+      let css: string;
       if (/fondo|background/i.test(r)) {
         css = `body{background:${hex} !important}`;
+      } else if (/cabecera|header|men[uu]|navega/i.test(r)) {
+        css = `header,[class*="header" i],[id*="header" i],[class*="menu" i],nav{background-color:${hex} !important}`;
+      } else if (/pie|footer/i.test(r)) {
+        css = `footer,[class*="footer" i],[id*="footer" i]{background-color:${hex} !important}`;
       } else if (/bot[oó]n|botones|btn/i.test(r)) {
         css = `button,.btn,[class*="btn"]{background-color:${hex} !important;color:#fff !important}`;
-      } else if (/titul/i.test(r)) {
+      } else if (titleish.test(r)) {
         css = `h1,h2,h3,h4,h5,h6{color:${hex} !important}`;
       } else if (/enlace|enlaces|link|links/i.test(r)) {
         css = `a{color:${hex} !important}`;
@@ -1242,12 +1267,13 @@ export function deterministicFallback(opts: { html: string; request: string }): 
         css = `*{color:${hex} !important} a,#btn,.btn,button{color:${hex} !important}`;
       }
       ops.push({ op: "injectCss", css });
-      return { ops, reply: `He aplicado el color ${mColor[1]} (intérprete integrado). Dime si quieres ajustarlo con más detalle.` };
+      return { ops, reply: `He aplicado el color ${mColor[1]} (intérprete integrado). Dime si quieres ajustarlo con más detalle.`, kind: "color" };
     }
   }
 
-  // 3) "cambia X por Y", "sustituye X a Y", "pon X como Y"...
-  const mCambia = /\b(?:cambia|cambiar|sustituye|sustituir|reemplaza|reemplazar|pon|ponga|deja|dejar|pasa|pasar)\s+(.+?)\s+(?:por|a|en|como)\s+(.+?)[.!¡¿?]*$/i.exec(opts.request);
+  // 3) Cambios de texto: "cambia X por Y", "sustituye X a Y", "pon X como Y",
+  //    "renombra A a B", "convierte X en Y"... También "cambia el título a Z".
+  const mCambia = /\b(?:cambia|cambiar|cambiame|cambiadme|sustituye|sustituir|reemplaza|reemplazar|renombra|renombrar|pon|ponga|ponme|deja|dejar|pasa|pasar|conviert[ea])\s+(.+?)\s+(?:por|a|en|como)\s+(.+?)[.!¡¿?]*$/i.exec(opts.request);
   if (mCambia) {
     const cleanPhrase = (s: string) =>
       s
@@ -1258,29 +1284,59 @@ export function deterministicFallback(opts: { html: string; request: string }): 
     const from = cleanPhrase(mCambia[1]);
     const to = cleanPhrase(mCambia[2]);
     if (from && to && !/tod[oa]s?\s*(los|la)/.test(from)) {
+      if (/(titul|titular|heading|encabezado|nombre|marca|logo|slogan|eslogan)/i.test(from)) {
+        // Si además se indica el texto exacto ("cambia el titular ACERCA DE
+        // NOSOTROS por SOBRE NOSOTROS"), lo reemplazamos por coincidencia exacta;
+        // si solo se dice "cambia el título a Z", cambiamos el primer encabezado.
+        const inner = from
+          .replace(/^(t[ií]tulo|titular|cabecera|encabezado|heading|nombre|marca|logo|slogan|eslogan|texto)\b\s*(?:de\s+)?/i, "")
+          .trim();
+        if (inner.length >= 3) {
+          ops.push({ op: "replaceByText", text: inner, newText: to });
+          return { ops, reply: `He cambiado "${inner}" por "${to}".`, kind: "replace" };
+        }
+        const tag = ["h1", "h2", "h3", "h4"].find((t) => new RegExp(`<${t}\\b`, "i").test(opts.html));
+        if (tag) {
+          ops.push({ op: "replaceText", selector: tag, text: to });
+          return { ops, reply: `He cambiado el ${tag} por "${to}".`, kind: "replace" };
+        }
+      }
       ops.push({ op: "replaceByText", text: from, newText: to });
-      return { ops, reply: `He cambiado "${from}" por "${to}". Si quieres que también afecte a otros sitios de la web, dímelo.` };
+      return { ops, reply: `He cambiado "${from}" por "${to}". Si quieres que también afecte a otros sitios de la web, dímelo.`, kind: "replace" };
     }
   }
 
-  // 4) "quita/borra/oculta... el banner de cookies / la newsletter / una sección".
-  const reQuita = /\b(?:quita|quitar|borra|borrar|oculta|ocultar|elimina|eliminar|saca|sacar|desactiva|desactivar)\s+(?:el|la|los|las)?\s*([a-záéíóúñü0-9][a-záéíóúñü0-9 ._-]{2,})(?:\s+de\s+\w+)*[.!¡¿?]*$/i.exec(opts.request);
+  // 4) "quita/borra/oculta... el banner de cookies / la newsletter / una sección /
+  //    las fotos / la cabecera / el pie / el menú / un texto concreto".
+  const reQuita = /\b(?:quita|quitar|borra|borrar|oculta|ocultar|elimina|eliminar|saca|sacar|desactiva|desactivar|esconde|esconder)\s+(?:el|la|los|las|ese|esa)?\s*([a-záéíóúñü0-9][a-záéíóúñü0-9 ._-]{2,})(?:\s+de\s+\w+)*[.!¡¿?]*$/i.exec(opts.request);
   if (reQuita) {
     const what = reQuita[1].trim();
     const cookieLike = /cookie|consent|aviso|cookies|privacidad|acept/i.test(what);
     if (cookieLike) {
       ops.push({ op: "hide", selector: '[id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],#onetrust-consent-sdk,.onetrust-pc-dark-filter,.cookie-banner,.cookieconsent,.cc-window,.cc-banner' });
-      return { ops, reply: "He ocultado el aviso de cookies y el banner de consentimiento." };
+      return { ops, reply: "He ocultado el aviso de cookies y el banner de consentimiento.", kind: "hide" };
     }
-    if (/newsletter|suscrip|correo|bolet/i.test(what)) {
+    if (/newsletter|suscrip|correo|bolet/i.test(what) || /correo/i.test(r)) {
       ops.push({ op: "hide", selector: '[class*="newsletter" i],[id*="newsletter" i],[class*="subscribe" i],[class*="suscrip" i],[data-section*="email" i]' });
       ops.push({ op: "hide", selector: 'form[action*="contact"]' });
-      return { ops, reply: "He ocultado el bloque de newsletter/suscripción." };
+      return { ops, reply: "He ocultado el bloque de newsletter/suscripción.", kind: "hide" };
+    }
+    if (/fot|im[aá]gene|im[aá]genes|img/i.test(what)) {
+      ops.push({ op: "hide", selector: "img,[class*='image' i],[class*='foto' i]" });
+      return { ops, reply: "He ocultado las imágenes de la web.", kind: "hide" };
+    }
+    if (/cabecera|header|men[uu]|navega|nav/i.test(what) || /cabecera|header|men[uu]/i.test(r)) {
+      ops.push({ op: "hide", selector: 'header,[class*="header" i],[id*="header" i],[class*="menu" i],nav,[class*="nav" i]' });
+      return { ops, reply: "He ocultado la cabecera y el menú de navegación.", kind: "hide" };
+    }
+    if (/pie|footer/i.test(what) || /pie\s+de/i.test(r)) {
+      ops.push({ op: "hide", selector: 'footer,[class*="footer" i],[id*="footer" i]' });
+      return { ops, reply: "He ocultado el pie de página.", kind: "hide" };
     }
     if (what.length >= 3 && !/todo|todas|todos|nada|web|tienda|p[aá]gina/.test(what)) {
       const sel = `[id*="${escSel(what)}" i],[class*="${escSel(what)}" i],[data-section*="${escSel(what)}" i],[href*="${escSel(what)}" i]`;
       ops.push({ op: "hide", selector: sel });
-      return { ops, reply: `He ocultado los bloques que contienen "${what}".` };
+      return { ops, reply: `He ocultado los bloques que contienen "${what}".`, kind: "hide" };
     }
   }
 
@@ -1290,7 +1346,7 @@ export function deterministicFallback(opts: { html: string; request: string }): 
   const sizeSmaller = /(?:peque[ñn][oa]s?|encoge|reducir|reduce\b|baja\s+la\s+letra|haz\s+.{0,12}m[aá]s\s+peque[ñn]o)/i.test(r);
   if (sizeLarger || sizeSmaller) {
     const pct = sizeSmaller ? "90%" : "120%";
-    const css = /titul|heading|encabe|title/i.test(r)
+    const css = titleish.test(r)
       ? `h1,h2,h3,h4,h5,h6{font-size:${pct} !important}`
       : `body{font-size:${sizeSmaller ? "92%" : "112%"} !important}`;
     ops.push({ op: "injectCss", css });
@@ -1299,6 +1355,7 @@ export function deterministicFallback(opts: { html: string; request: string }): 
       reply: sizeSmaller
         ? "He reducido el tamaño del texto. Dime si quieres ajustarlo más."
         : "He agrandado el texto. Dime si quieres ajustarlo más.",
+      kind: "size",
     };
   }
 
@@ -1311,9 +1368,56 @@ export function deterministicFallback(opts: { html: string; request: string }): 
         : "center"
     : "";
   if (align) {
-    const target = /titul|heading|encabe|title/i.test(r) ? "h1,h2,h3,h4,h5,h6" : "h1,h2,h3,h4,h5,h6,p,div";
+    const target = titleish.test(r) ? "h1,h2,h3,h4,h5,h6" : "h1,h2,h3,h4,h5,h6,p,div";
     ops.push({ op: "injectCss", css: `${target}{text-align:${align} !important}` });
-    return { ops, reply: `He alineado el texto ${{ center: "al centro", right: "a la derecha", justify: "justificado" }[align]}.` };
+    return { ops, reply: `He alineado el texto ${{ center: "al centro", right: "a la derecha", justify: "justificado" }[align]}.`, kind: "align" };
+  }
+
+  // 7) Mayúsculas / minúsculas: "pon el título en mayúsculas".
+  if (/may[uú]scul|uppercase/i.test(r) && !noCmd) {
+    const css = titleish.test(r) ? `h1,h2,h3,h4,h5,h6{text-transform:uppercase !important}` : `body{text-transform:uppercase !important}`;
+    ops.push({ op: "injectCss", css });
+    return { ops, reply: "He puesto el texto en mayúsculas.", kind: "upper" };
+  }
+  if (/min[uú]scul|lowercase/i.test(r)) {
+    const css = titleish.test(r) ? `h1,h2,h3,h4,h5,h6{text-transform:none !important}` : `body{text-transform:none !important}`;
+    ops.push({ op: "injectCss", css });
+    return { ops, reply: "He quitado las mayúsculas.", kind: "lower" };
+  }
+
+  // 8) Negrita / cursiva: "en negrita", "más grueso", "resalta".
+  if (/\bnegrita|en\s+negrit|m[aá]s\s+grueso|resalt/i.test(r) && !/(quita|saca|sin\s+negrita)/i.test(r)) {
+    const css = titleish.test(r) ? `h1,h2,h3,h4,h5,h6{font-weight:700 !important}` : `body{font-weight:700 !important}`;
+    ops.push({ op: "injectCss", css });
+    return { ops, reply: "He puesto el texto en negrita.", kind: "bold" };
+  }
+  if (/cursiva|it[aá]lic/i.test(r) && !/(quita|saca)/i.test(r)) {
+    const css = titleish.test(r) ? `h1,h2,h3,h4,h5,h6{font-style:italic !important}` : `body{font-style:italic !important}`;
+    ops.push({ op: "injectCss", css });
+    return { ops, reply: "He puesto el texto en cursiva.", kind: "italic" };
+  }
+
+  // 9) Modo oscuro / claro.
+  if (/modo\s+oscuro|tema\s+oscuro|oscurece|m[aá]s\s+oscur[oa]|en\s+oscuro|\boscuro/i.test(r) && !/claro|light|blanco/i.test(r) && !noCmd) {
+    ops.push({ op: "injectCss", css: "html,body{background:#0f1115 !important;color:#f3f4f6 !important} h1,h2,h3,h4,h5,h6,p,li,span,div{color:#f3f4f6 !important} a,a *{color:#93c5fd !important}" });
+    return { ops, reply: "He activado el modo oscuro.", kind: "dark" };
+  }
+  if (/modo\s+claro|tema\s+claro|aclara|m[aá]s\s+claro|en\s+blanco|fondo\s+blanco/i.test(r)) {
+    ops.push({ op: "injectCss", css: "html,body{background:#ffffff !important} h1,h2,h3,h4,h5,h6,p,li,span,div{color:#111827 !important} a{color:#2563eb !important}" });
+    return { ops, reply: "He aclarado la web.", kind: "light" };
+  }
+
+  // 10) Formas: "botones redondeados", "quita los bordes redondeados".
+  if (/redonde|esquinas|rounded/i.test(r)) {
+    const css = /quita|saca|sin/i.test(r)
+      ? `button,.btn,[class*="btn"]{border-radius:0 !important}`
+      : `button,.btn,[class*="btn"]{border-radius:14px !important}`;
+    ops.push({ op: "injectCss", css });
+    return { ops, reply: "He ajustado el redondeo de los botones.", kind: "shape" };
+  }
+  if (/espac[ií]|m[aá]s\s+separ|entre\s+t[ée]rminos|interline/i.test(r)) {
+    ops.push({ op: "injectCss", css: "p,li{line-height:1.8 !important} section,div,article{margin-bottom:2rem !important}" });
+    return { ops, reply: "He aumentado el espaciado y la separación entre bloques.", kind: "spacing" };
   }
 
   return { ops: [], reply: "" };
