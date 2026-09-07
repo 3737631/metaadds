@@ -1,5 +1,5 @@
 import { buildSnapshot } from "@/lib/stores/snapshot";
-import { chatEditStoreStream, type ChatOp } from "@/lib/stores/chat";
+import { chatEditStoreStream, deterministicFallback, type ChatOp } from "@/lib/stores/chat";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -90,11 +90,20 @@ export async function POST(req: Request) {
       console.error(`[/api/stores/chat] url=${url} request=${request.slice(0,40)} delivered=${delivered} provider=${provider} model=${model}`);
 
       if (delivered === 0) {
-        send({
-          type: "error",
-          code: "AI_ERROR",
-          message: "No pude traducir tu petición en cambios concretos. Reformúlalo (ej: cambia el titular, cambia el color a rojo, quita el banner de cookies).",
-        });
+        // Último recurso: intérprete determinista para que los cambios sencillos
+        // SIEMPRE se apliquen aunque todos los proveedores de IA hayan fallado.
+        const fb = deterministicFallback({ html: snapshotHtml, request });
+        if (fb.ops.length > 0) {
+          sendOps(fb.ops);
+          if (fb.reply) sendReply(fb.reply);
+          console.error(`[/api/stores/chat] fallback determinista aplicó ${fb.ops.length} ops`);
+        } else {
+          send({
+            type: "error",
+            code: "AI_ERROR",
+            message: "No pude traducir tu petición en cambios concretos. Reformúlalo (ej: cambia el titular, cambia el color a rojo, quita el banner de cookies).",
+          });
+        }
       } else {
         send({ type: "done", provider, model });
       }

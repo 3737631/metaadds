@@ -60,6 +60,7 @@ const EDITOR_SCRIPT = `
     '[data-eid][data-edit="1"] { outline:1.5px dashed rgba(59,130,246,.75) !important; outline-offset:1px; cursor:text !important; transition: background .15s; }',
     '[data-eid][data-edit="1"]:hover { background: rgba(59,130,246,.08); }',
     '[data-eid][data-img="1"] { cursor:pointer; }',
+    '[data-drop="1"] { outline:3px dashed #22c55e !important; outline-offset:2px; }',
     '.ed-banner { position:fixed; top:0; left:0; right:0; z-index:99999; background:#2563eb; color:#fff; text-align:center; font:600 12px/20px system-ui,sans-serif; letter-spacing:.2px; }'
   ].join('\\n');
   document.head.appendChild(st);
@@ -67,7 +68,7 @@ const EDITOR_SCRIPT = `
   // Banner informativo
   var banner = document.createElement('div');
   banner.className = 'ed-banner';
-  banner.textContent = 'Clic para editar: toca cualquier texto o imagen de la web';
+  banner.textContent = 'Clic para editar: toca cualquier texto o imagen · arrastra una foto encima para cambiarla';
   banner.style.pointerEvents = 'none';
   document.body.appendChild(banner);
 
@@ -104,28 +105,144 @@ const EDITOR_SCRIPT = `
     el.addEventListener('blur', done);
   }
 
-  function pickImage(el) {
-    var current = el.tagName === 'IMG' ? (el.getAttribute('src') || '') : '';
-    var url = window.prompt('Nueva URL de la imagen:', current);
-    if (!url) return;
-    function apply(src) {
-      if (el.tagName === 'IMG') { el.setAttribute('src', src); }
-      else { el.style.backgroundImage = 'url(' + src + ')'; }
-      parent.postMessage({ type: 'snapshot-edit', mode: 'img', eid: el.getAttribute('data-eid'), value: src }, '*');
-    }
-    if (/^https?:\\/\\//i.test(url)) apply(url);
-    else apply(url);
+  // --- Edición de fotos simple: subir desde el navegador/galería (drag & drop o
+  // clic), pegar URL o borrar. El botón de la imagen abre una barra con acciones.
+  function readFileAsDataURL(file, cb) {
+    var r = new FileReader();
+    r.onload = function () { cb(String(r.result || '')); };
+    r.readAsDataURL(file);
   }
+
+  function applyImage(el, src) {
+    try {
+      // Hueco "Foto eliminada": lo sustituimos por una imagen real con el mismo eid.
+      if (el.getAttribute && el.getAttribute('data-img') === '1') {
+        var nh = document.createElement('img');
+        nh.setAttribute('data-eid', el.getAttribute('data-eid'));
+        nh.setAttribute('data-img', '1');
+        nh.src = src;
+        el.parentNode.replaceChild(nh, el);
+        el = nh;
+      }
+      if (el.tagName === 'IMG') { el.setAttribute('src', src); el.removeAttribute('srcset'); }
+      else if (/background-image/.test(el.getAttribute('style') || '')) { el.style.backgroundImage = 'url(' + src + ')'; }
+      else if (el.tagName === 'PICTURE') {
+        var im = el.querySelector('img');
+        if (im) { im.setAttribute('src', src); im.removeAttribute('srcset'); }
+      }
+      else if (el.tagName === 'IMG') { el.setAttribute('src', src); }
+    } catch (e) {}
+    parent.postMessage({ type: 'snapshot-edit', mode: 'img', eid: el.getAttribute('data-eid'), value: src }, '*');
+  }
+
+  function deleteImage(el) {
+    if (el.tagName === 'IMG') {
+      var holder = document.createElement('div');
+      holder.setAttribute('data-eid', el.getAttribute('data-eid'));
+      holder.setAttribute('data-img', '1');
+      holder.style.cssText = 'aspect-ratio:16/9;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font:500 13px system-ui,sans-serif;border:1.5px dashed #cbd5e1;border-radius:12px;min-height:80px;';
+      holder.textContent = 'Foto eliminada';
+      el.parentNode.replaceChild(holder, el);
+    } else if (/background-image/.test(el.getAttribute('style') || '')) {
+      el.style.backgroundImage = '';
+    }
+    parent.postMessage({ type: 'snapshot-edit', mode: 'img', eid: el.getAttribute('data-eid'), value: '' }, '*');
+  }
+
+  var imageBarIds = [];
+  function openImageBar(el) {
+    closeImageBar();
+    var bar = document.createElement('div');
+    bar.setAttribute('data-eid', 'bar' + (++eid));
+    bar.style.cssText = 'position:absolute;z-index:2147483000;display:flex;gap:6px;padding:6px 8px;background:rgba(17,24,39,.92);border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-family:system-ui,sans-serif;transform:translateY(-110%);transition:opacity .12s;top:0;left:0;';
+    var mk = function (label, onClick) {
+      var b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'border:0;background:#ffffff;color:#111827;font:600 11px/1 system-ui,sans-serif;padding:7px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;';
+      b.onclick = function (e) { e.preventDefault(); e.stopPropagation(); onClick(); };
+      return b;
+    };
+    var fileBtn = mk('📁 Elegir foto', function () {
+      var inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'image/*';
+      inp.className = '__ed_file';
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.onchange = function () {
+        var f = inp.files && inp.files[0];
+        if (f) readFileAsDataURL(f, function (src) { applyImage(el, src); closeImageBar(); });
+        if (inp.parentNode) inp.parentNode.removeChild(inp);
+      };
+      inp.click();
+    });
+    var urlBtn = mk('🔗 URL', function () {
+      var val = window.prompt('URL de la foto:', el.tagName === 'IMG' ? (el.getAttribute('src') || '') : '');
+      closeImageBar();
+      if (val) applyImage(el, val);
+    });
+    var delBtn = mk('🗑️ Borrar', function () { deleteImage(el); closeImageBar(); });
+    bar.appendChild(fileBtn);
+    bar.appendChild(urlBtn);
+    bar.appendChild(delBtn);
+    el.setAttribute('data-eid-bar', '1');
+    var posEl = el;
+    bar.style.position = 'absolute';
+    var rect = posEl.getBoundingClientRect();
+    bar.style.top = (rect.top + window.scrollY - 42) + 'px';
+    bar.style.left = (rect.left + window.scrollX) + 'px';
+    document.body.appendChild(bar);
+    imageBarIds.push(bar);
+    // Cerrar al hacer clic fuera.
+    setTimeout(function () {
+      document.addEventListener('click', function (e) {
+        if (e.target && e.target !== bar && !bar.contains(e.target)) closeImageBar();
+      });
+    }, 60);
+  }
+
+  function closeImageBar() {
+    imageBarIds.forEach(function (b) { if (b && b.parentNode) b.parentNode.removeChild(b); });
+    imageBarIds = [];
+  }
+
+  // Drag & drop: arrastrar una foto de tu navegador sobre una imagen la reemplaza.
+  document.addEventListener('dragover', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-eid]') : null;
+    if (el && e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.indexOf('Files') !== -1) {
+      e.preventDefault();
+      el.setAttribute('data-drop', '1');
+    }
+  }, true);
+  document.addEventListener('dragleave', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-drop]') : null;
+    if (el) el.removeAttribute('data-drop');
+  }, true);
+  document.addEventListener('drop', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-eid]') : null;
+    if (!el || !e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    var f = e.dataTransfer.files[0];
+    if (f && /^image\\//i.test(f.type || '')) {
+      e.preventDefault();
+      var im = el.tagName === 'IMG' ? el : el.querySelector('img');
+      if (!im && /background-image/.test(el.getAttribute('style') || '')) im = el;
+      var target = im || el;
+      readFileAsDataURL(f, function (src) { applyImage(target, src); target.removeAttribute('data-drop'); });
+    }
+  }, true);
 
   // Delegación de clics (captura). Los enlaces NO navegan si son editables; el
   // propio preventDefault lo garantiza; los no-editables conservan su href.
   document.addEventListener('click', function (e) {
     var t = e.target;
     if (t && t === banner) return;
+    // Los clics sobre la barra de acciones de foto (Elegir/Borrar/URL) no se
+    // interceptan: sus botones tienen su propio handler.
+    if (t && t.closest && t.closest('[data-eid^="bar"]')) return;
     var el = t && t.closest ? t.closest('[data-eid]') : null;
     if (!el) return;
-    if (el.tagName === 'IMG' || el.tagName === 'PICTURE' || /background-image/.test(el.getAttribute('style') || '')) {
-      e.preventDefault(); e.stopPropagation(); pickImage(el); return;
+    if (el.tagName === 'IMG' || el.tagName === 'PICTURE' || /background-image/.test(el.getAttribute('style') || '') || el.getAttribute('data-img') === '1') {
+      e.preventDefault(); e.stopPropagation(); openImageBar(el); return;
     }
     if (isTextEl(el)) {
       e.preventDefault(); e.stopPropagation(); activateText(el);
@@ -324,6 +441,12 @@ const OPS_RECEIVER = `
       });
       var banner = document.querySelector('.ed-banner');
       if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+      // La barra de acciones de foto y los inputs de subida temporales no se guardan.
+      var bars = document.querySelectorAll('[data-eid^="bar"], .__ed_file');
+      for (var bi = 0; bi < bars.length; bi++) {
+        var barEl = bars[bi];
+        if (barEl && barEl.parentNode) barEl.parentNode.removeChild(barEl);
+      }
       var tagged = document.querySelectorAll('[data-eid], [data-edit], [contenteditable], [__ED__]');
       for (var ti = 0; ti < tagged.length; ti++) {
         var el = tagged[ti];

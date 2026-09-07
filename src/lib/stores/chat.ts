@@ -1172,3 +1172,117 @@ export async function chatEditStoreStream(
   console.error("[chatStream] todos los proveedores terminaron sin producir ops");
   return { provider: undefined, model: undefined };
 }
+
+/** Escapa una cadena para usarla dentro de un selector de atributo CSS. */
+function escSel(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+const COLORES_MAP: Record<string, string> = {
+  rojo: "#e11d48",
+  azul: "#2563eb",
+  verde: "#16a34a",
+  negro: "#111827",
+  blanco: "#ffffff",
+  amarillo: "#facc15",
+  naranja: "#f97316",
+  morado: "#7c3aed",
+  rosa: "#ec4899",
+  gris: "#6b7280",
+  marron: "#92400e",
+  celeste: "#38bdf8",
+  turquesa: "#14b8a6",
+};
+
+/**
+ * Intérprete determinista de peticiones. Se ejecuta cuando la IA no consigue
+ * producir cambios (proveedores gratuitos saturados/sin cuota): si la petición
+ * es de un formato reconocible, generamos operaciones reales para que el cambio
+ * SIEMPRE se aplique y el usuario no vea "No pude aplicar el cambio".
+ * Devuelve ops vacías si la petición no encaja (entonces se muestra el error).
+ */
+export function deterministicFallback(opts: { html: string; request: string }): { ops: ChatOp[]; reply: string } {
+  const r = opts.request.toLowerCase().trim();
+  const ops: ChatOp[] = [];
+
+  // 1) Traducción de idioma. El glosario ES→EN es fiable; si el idioma pedido NO es
+  // inglés (español/francés/...), el glosario no aplica y se devuelve sin ops.
+  const toEnglish =
+    isLanguageChange(opts.request) &&
+    !/a espa[ñn]ol|en espa[ñn]ol|a franc[ée]s|franc[ée]s|portugu[ée]s|alem[aá]n|italiano|french|portuguese|german|italian/.test(r);
+  if (toEnglish) {
+    for (const t of extractVisibleTexts(opts.html, 150)) {
+      const en = GLOSSARY_ES_EN[normSp(t)];
+      if (en && normSp(en) !== normSp(t)) ops.push({ op: "replaceByText", text: t, newText: en });
+    }
+    if (ops.length) {
+      return {
+        ops,
+        reply: `He traducido ${ops.length} textos con el traductor integrado (los proveedores de IA no respondieron). Revisa la web y pídeme lo que quieras ajustar.`,
+      };
+    }
+  }
+
+  // 2) Color: "pon el botón en rojo", "cambia los titulares a azul", "fondo negro"...
+  const colorNames = Object.keys(COLORES_MAP);
+  const mColor = new RegExp("\\b(" + colorNames.join("|") + ")\\b", "i").exec(r);
+  if (mColor && /color|pintar|pon|ponle|cambia|cambiar|deja|fondo|background/i.test(r)) {
+    const hex = COLORES_MAP[(mColor[1] || "").toLowerCase()];
+    if (hex) {
+      let css = "";
+      if (/fondo|background/i.test(r)) {
+        css = `body{background:${hex} !important}`;
+      } else if (/bot[oó]n|botones|btn/i.test(r)) {
+        css = `button,.btn,[class*="btn"]{background-color:${hex} !important;color:#fff !important}`;
+      } else if (/titul/i.test(r)) {
+        css = `h1,h2,h3,h4,h5,h6{color:${hex} !important}`;
+      } else if (/enlace|enlaces|link|links/i.test(r)) {
+        css = `a{color:${hex} !important}`;
+      } else {
+        css = `*{color:${hex} !important} a,#btn,.btn,button{color:${hex} !important}`;
+      }
+      ops.push({ op: "injectCss", css });
+      return { ops, reply: `He aplicado el color ${mColor[1]} (intérprete integrado). Dime si quieres ajustarlo con más detalle.` };
+    }
+  }
+
+  // 3) "cambia X por Y", "sustituye X a Y", "pon X como Y"...
+  const mCambia = /\b(?:cambia|cambiar|sustituye|sustituir|reemplaza|reemplazar|pon|ponga|deja|dejar|pasa|pasar)\s+(.+?)\s+(?:por|a|en|como)\s+(.+?)[.!¡¿?]*$/i.exec(opts.request);
+  if (mCambia) {
+    const cleanPhrase = (s: string) =>
+      s
+        .replace(/^["'“”«»(]|["'“”«»,.)]$/g, "")
+        .replace(/^(el|la|los|las|un|una|unos|unas)\s+/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const from = cleanPhrase(mCambia[1]);
+    const to = cleanPhrase(mCambia[2]);
+    if (from && to && !/tod[oa]s?\s*(los|la)/.test(from)) {
+      ops.push({ op: "replaceByText", text: from, newText: to });
+      return { ops, reply: `He cambiado "${from}" por "${to}". Si quieres que también afecte a otros sitios de la web, dímelo.` };
+    }
+  }
+
+  // 4) "quita/borra/oculta... el banner de cookies / la newsletter / una sección".
+  const reQuita = /\b(?:quita|quitar|borra|borrar|oculta|ocultar|elimina|eliminar|saca|sacar|desactiva|desactivar)\s+(?:el|la|los|las)?\s*([a-záéíóúñü0-9][a-záéíóúñü0-9 ._-]{2,})(?:\s+de\s+\w+)*[.!¡¿?]*$/i.exec(opts.request);
+  if (reQuita) {
+    const what = reQuita[1].trim();
+    const cookieLike = /cookie|consent|aviso|cookies|privacidad|acept/i.test(what);
+    if (cookieLike) {
+      ops.push({ op: "hide", selector: '[id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],#onetrust-consent-sdk,.onetrust-pc-dark-filter,.cookie-banner,.cookieconsent,.cc-window,.cc-banner' });
+      return { ops, reply: "He ocultado el aviso de cookies y el banner de consentimiento." };
+    }
+    if (/newsletter|suscrip|correo|bolet/i.test(what)) {
+      ops.push({ op: "hide", selector: '[class*="newsletter" i],[id*="newsletter" i],[class*="subscribe" i],[class*="suscrip" i],[data-section*="email" i]' });
+      ops.push({ op: "hide", selector: 'form[action*="contact"]' });
+      return { ops, reply: "He ocultado el bloque de newsletter/suscripción." };
+    }
+    if (what.length >= 3 && !/todo|todas|todos|nada|web|tienda|p[aá]gina/.test(what)) {
+      const sel = `[id*="${escSel(what)}" i],[class*="${escSel(what)}" i],[data-section*="${escSel(what)}" i],[href*="${escSel(what)}" i]`;
+      ops.push({ op: "hide", selector: sel });
+      return { ops, reply: `He ocultado los bloques que contienen "${what}".` };
+    }
+  }
+
+  return { ops: [], reply: "" };
+}
